@@ -194,6 +194,9 @@ where
                     Instruction::LoadGlobal(name, dst) => {
                         writeln!(f, "{} = load_global {}", dst, name)?
                     }
+                    Instruction::StoreGlobal(name, src) => {
+                        writeln!(f, "store_global {} {}", name, src)?;
+                    }
                     Instruction::Cast(op) => {
                         writeln!(
                             f,
@@ -295,6 +298,9 @@ impl DataFlowGraph {
                     }
                     Instruction::LoadGlobal(_, dst) => {
                         defs.insert(*dst, loc);
+                    }
+                    Instruction::StoreGlobal(_, src) => {
+                        uses.entry(*src).or_default().push(loc);
                     }
                     Instruction::Cast(op) => {
                         uses.entry(op.src).or_default().push(loc);

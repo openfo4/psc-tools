@@ -39,6 +39,7 @@ pub enum Instruction<T> {
     Store(Unop<T>),
     Return(T),
     LoadGlobal(String, T),
+    StoreGlobal(String, T),
     Cast(Cast<T>),
     StringConcat(Binop<T>),
 }
@@ -517,6 +518,23 @@ fn load_place_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
 
 /// Stores the given `value` into the given place expression `dst`.
 fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
+    let place = lower_expr(translator, dst);
+
+    match &translator.types[&place] {
+        DynType::PlaceGlobal(global) => {
+            let global = translator
+                .ast
+                .globals
+                .iter()
+                .find(|v| &v.name == global)
+                .unwrap();
+            let value = convert_to(translator, value, DynType::from(&global.ty));
+            translator.push_ins(Instruction::StoreGlobal(global.name.clone(), value));
+            return;
+        }
+        _ => {}
+    }
+
     // The place is a local on-stack variable.
     if let Expr::Ident { ident } = dst {
         let var = translator.variables[ident];
@@ -537,9 +555,6 @@ fn lower_arithmetic_binop(
 ) -> Value {
     let lhs = load_place_expr(translator, lhs);
     let rhs = load_place_expr(translator, rhs);
-
-    dbg!(&translator);
-    dbg!(lhs, rhs);
 
     let lhs_ty = &translator.types[&lhs];
     let rhs_ty = &translator.types[&rhs];
