@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::codegen::reg::Register;
 use crate::codegen::ssa::BlockId;
-use crate::codegen::{ControlFlowGraph, FuncInfo, Instruction};
+use crate::codegen::{Binop, ControlFlowGraph, FuncInfo, Instruction};
 use crate::lexer::Literal;
 
 use pex::{ConditionalBranch, Instruction as PexInstruction, Unop, Value};
@@ -24,6 +25,12 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
     func.cfg.visit_bfs(|id, block| {
         let mut instructions = Vec::new();
 
+        let convert_binop = |op: &Binop<Register>| pex::Binop {
+            lhs: Value::Ident(op.lhs.to_string()),
+            rhs: Value::Ident(op.rhs.to_string()),
+            dst: Value::Ident(op.dst.to_string()),
+        };
+
         for ins in &block.instructions {
             let out = match ins {
                 Instruction::AddParams(p) => {
@@ -33,6 +40,7 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                             ty: p.ty.to_string(),
                         });
                     }
+
                     continue;
                 }
                 // We always directly embed literals as immediate values in the
@@ -49,16 +57,23 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                     src: Value::Ident(op.src.to_string()),
                     dst: Value::Ident(op.dst.to_string()),
                 }),
-                Instruction::IAdd(op) => pex::Instruction::IAdd(pex::Binop {
-                    lhs: Value::Ident(op.lhs.to_string()),
-                    rhs: Value::Ident(op.rhs.to_string()),
-                    dst: Value::Ident(op.dst.to_string()),
-                }),
-                Instruction::CmpEq(op) => PexInstruction::CmpEq(pex::Binop {
-                    lhs: Value::Ident(op.lhs.to_string()),
-                    rhs: Value::Ident(op.rhs.to_string()),
-                    dst: Value::Ident(op.dst.to_string()),
-                }),
+                Instruction::IAdd(op) => pex::Instruction::IAdd(convert_binop(op)),
+                Instruction::ISub(op) => pex::Instruction::ISub(convert_binop(op)),
+                Instruction::IMul(op) => pex::Instruction::IMul(convert_binop(op)),
+                Instruction::IDiv(op) => pex::Instruction::IDiv(convert_binop(op)),
+                Instruction::IRem(op) => pex::Instruction::IMod(convert_binop(op)),
+                Instruction::FAdd(op) => pex::Instruction::FAdd(convert_binop(op)),
+                Instruction::FSub(op) => pex::Instruction::FSub(convert_binop(op)),
+                Instruction::FMul(op) => pex::Instruction::FMul(convert_binop(op)),
+                Instruction::FDiv(op) => pex::Instruction::FDiv(convert_binop(op)),
+                Instruction::FRem(op) => todo!(),
+                Instruction::StringConcat(op) => pex::Instruction::StringConcat(convert_binop(op)),
+                Instruction::CmpEq(op) => pex::Instruction::CmpEq(convert_binop(op)),
+                Instruction::CmpNe(op) => todo!(),
+                Instruction::CmpLt(op) => pex::Instruction::CmpLt(convert_binop(op)),
+                Instruction::CmpLe(op) => pex::Instruction::CmpLe(convert_binop(op)),
+                Instruction::CmpGt(op) => pex::Instruction::CmpGt(convert_binop(op)),
+                Instruction::CmpGe(op) => pex::Instruction::CmpGe(convert_binop(op)),
                 Instruction::Return(value) => {
                     PexInstruction::Return(Value::Ident(value.to_string()))
                 }
@@ -111,11 +126,16 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
 
                     pex::Instruction::Branch(pex::Branch { offset: 0 })
                 }
-                _ => {
-                    continue;
-                }
+                Instruction::LoadGlobal(global, dst) => pex::Instruction::Store(Unop {
+                    src: Value::Ident(global.clone()),
+                    dst: Value::Ident(dst.to_string()),
+                }),
+                Instruction::StoreGlobal(global, src) => pex::Instruction::Store(Unop {
+                    src: Value::Ident(src.to_string()),
+                    dst: Value::Ident(global.clone()),
+                }),
+                _ => continue,
             };
-
             instructions.push(out);
         }
 

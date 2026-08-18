@@ -443,11 +443,9 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         Expr::Deref { lhs, rhs } => {
             let lhs = lower_expr(translator, lhs);
             let rhs = lower_expr(translator, rhs);
-            let (Some(DynType::Path(lhs)), Some(DynType::Path(rhs))) =
-                (translator.types.get(&lhs), translator.types.get(&rhs))
-            else {
-                unreachable!();
-            };
+            let lhs = translator.types[&lhs].unwrap_path();
+            let rhs = translator.types[&rhs].unwrap_path();
+            dbg!(&lhs, &rhs);
 
             todo!();
         }
@@ -651,6 +649,15 @@ impl DynType {
     fn unwrap_func(&self) -> &str {
         match self {
             Self::Func(f) => f,
+            _ => unreachable!(),
+        }
+    }
+
+    fn unwrap_path(&self) -> &str {
+        match self {
+            Self::Path(v) => v,
+            Self::Func(v) => v,
+            Self::PlaceGlobal(v) => v,
             _ => unreachable!(),
         }
     }

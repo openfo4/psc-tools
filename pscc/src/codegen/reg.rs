@@ -26,6 +26,12 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                 }
             });
 
+            let mut convert_binop = |op: &Binop<Value>| Binop {
+                lhs: regs.get(op.lhs),
+                rhs: regs.get(op.rhs),
+                dst: regs.alloc(op.dst),
+            };
+
             let out = match ins {
                 Instruction::AddParams(params) => {
                     let params = params
@@ -52,16 +58,23 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                 Instruction::Literal(lit, dst) => {
                     Instruction::Literal(lit.clone(), regs.alloc(*dst))
                 }
-                Instruction::IAdd(op) => Instruction::IAdd(Binop {
-                    lhs: regs.get(op.lhs),
-                    rhs: regs.get(op.rhs),
-                    dst: regs.alloc(op.dst),
-                }),
-                Instruction::CmpEq(op) => Instruction::CmpEq(Binop {
-                    lhs: regs.get(op.lhs),
-                    rhs: regs.get(op.rhs),
-                    dst: regs.alloc(op.dst),
-                }),
+                Instruction::IAdd(op) => Instruction::IAdd(convert_binop(op)),
+                Instruction::ISub(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::IMul(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::IDiv(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::IRem(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::FAdd(op) => Instruction::IAdd(convert_binop(op)),
+                Instruction::FSub(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::FMul(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::FDiv(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::FRem(op) => Instruction::ISub(convert_binop(op)),
+                Instruction::CmpEq(op) => Instruction::CmpEq(convert_binop(op)),
+                Instruction::CmpNe(op) => Instruction::CmpNe(convert_binop(op)),
+                Instruction::CmpLt(op) => Instruction::CmpLt(convert_binop(op)),
+                Instruction::CmpLe(op) => Instruction::CmpLe(convert_binop(op)),
+                Instruction::CmpGt(op) => Instruction::CmpGt(convert_binop(op)),
+                Instruction::CmpGe(op) => Instruction::CmpGe(convert_binop(op)),
+                Instruction::StringConcat(op) => Instruction::StringConcat(convert_binop(op)),
                 Instruction::Call(op) => {
                     let args = op.args.iter().map(|arg| regs.get(*arg)).collect();
 
@@ -132,6 +145,10 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                     src_ty: op.src_ty.clone(),
                     dst_ty: op.dst_ty.clone(),
                 }),
+                Instruction::StoreGlobal(global, src) => {
+                    Instruction::StoreGlobal(global.clone(), regs.get(*src))
+                }
+
                 x => todo!("{:?}", x),
             };
 
@@ -247,19 +264,25 @@ where
     match ins {
         Instruction::AddParams(_) => {}
         Instruction::Literal(_, _) => {}
-        Instruction::IAdd(op) => binop(op),
-        Instruction::ISub(op) => binop(op),
-        Instruction::IMul(op) => binop(op),
-        Instruction::IDiv(op) => binop(op),
-        Instruction::IRem(op) => binop(op),
-        Instruction::CmpEq(op) => binop(op),
-        Instruction::CmpNe(op) => binop(op),
-        Instruction::CmpLt(op) => binop(op),
-        Instruction::CmpLe(op) => binop(op),
-        Instruction::CmpGt(op) => binop(op),
-        Instruction::CmpGe(op) => binop(op),
-        Instruction::Deref(op) => binop(op),
-        Instruction::Index(op) => binop(op),
+        Instruction::IAdd(op)
+        | Instruction::ISub(op)
+        | Instruction::IMul(op)
+        | Instruction::IDiv(op)
+        | Instruction::IRem(op)
+        | Instruction::FAdd(op)
+        | Instruction::FSub(op)
+        | Instruction::FMul(op)
+        | Instruction::FDiv(op)
+        | Instruction::FRem(op)
+        | Instruction::CmpEq(op)
+        | Instruction::CmpNe(op)
+        | Instruction::CmpLt(op)
+        | Instruction::CmpLe(op)
+        | Instruction::CmpGt(op)
+        | Instruction::CmpGe(op)
+        | Instruction::StringConcat(op)
+        | Instruction::Deref(op)
+        | Instruction::Index(op) => binop(op),
         Instruction::Brif(condition, _, then_args, _, else_args) => {
             f(*condition);
             for arg in then_args.iter().chain(else_args) {
@@ -280,6 +303,9 @@ where
         Instruction::LoadGlobal(_, _) => {}
         Instruction::Cast(op) => {
             f(op.src);
+        }
+        Instruction::StoreGlobal(_, src) => {
+            f(*src);
         }
         x => todo!("{:?}", x),
     }
