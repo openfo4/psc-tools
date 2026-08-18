@@ -7,7 +7,7 @@ use crate::codegen::ssa::BlockId;
 use crate::codegen::{ControlFlowGraph, FuncInfo, Instruction, ssa};
 use crate::lexer::Literal;
 
-use pex::{ConditionalBranch, Instruction as PexInstruction, Unop, Value, VariableDefinition};
+use pex::{ConditionalBranch, Instruction as PexInstruction, Unop, Value};
 
 pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
     let mut params = Vec::new();

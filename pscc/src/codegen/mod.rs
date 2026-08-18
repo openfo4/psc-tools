@@ -6,7 +6,7 @@ mod ssa;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter};
 
-use crate::ast::{Expr, Function, Statement, Type};
+use crate::ast::{Ast, Expr, Function, Statement, Type};
 use crate::codegen::func::{Block, ControlFlowGraph};
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::{BlockId, SsaBuilder, Value, Var};
@@ -27,13 +27,14 @@ pub enum Instruction<T> {
     CmpLe(Binop<T>),
     CmpGt(Binop<T>),
     CmpGe(Binop<T>),
-    Call(Call),
+    Call(Call<T>),
     Jmp(BlockId, Vec<T>),
     Brif(T, BlockId, Vec<T>, BlockId, Vec<T>),
     Deref(Binop<T>),
     Index(Binop<T>),
     Store(Unop<T>),
     Return(T),
+    LoadGlobal(String, T),
 }
 
 #[derive(Clone, Debug)]
@@ -50,21 +51,46 @@ pub struct Binop<T> {
 }
 
 #[derive(Clone, Debug)]
-struct Call {
-    callee: Value,
-    args: Vec<Value>,
-    returns: Value,
+struct Call<T> {
+    callee: String,
+    args: Vec<T>,
+    returns: T,
 }
 
-#[derive(Clone, Debug, Default)]
-struct Tranlsator {
+#[derive(Clone, Debug)]
+struct Tranlsator<'a> {
     ssa: SsaBuilder,
     variables: HashMap<String, Var>,
     blocks: HashMap<BlockId, Vec<Instruction<Value>>>,
     cur_block: Option<BlockId>,
+    entry: BlockId,
+    ast: &'a Ast,
+    func: &'a Function,
+    types: HashMap<Value, DynType>,
 }
 
-impl Tranlsator {
+impl<'a> Tranlsator<'a> {
+    fn new(ast: &'a Ast, func: &'a Function) -> Self {
+        let mut ssa = SsaBuilder::new();
+        let entry = ssa.create_block();
+        ssa.seal(entry);
+        ssa.switch_block(entry);
+
+        let mut blocks = HashMap::new();
+        blocks.insert(entry, Vec::new());
+
+        Self {
+            ssa,
+            variables: HashMap::new(),
+            blocks,
+            cur_block: Some(entry),
+            ast,
+            func,
+            entry,
+            types: HashMap::new(),
+        }
+    }
+
     pub fn get_or_create_var(&mut self, ident: &str) -> Var {
         *self
             .variables
@@ -89,15 +115,21 @@ impl Tranlsator {
         self.ssa.switch_block(block);
         self.cur_block = Some(block);
     }
+
+    fn load_place(&mut self, value: Value) -> Value {
+        match self.types.get(&value) {
+            Some(DynType::PlaceGlobal(global)) => {
+                let value = self.ssa.create_value();
+                self.push_ins(Instruction::LoadGlobal(global.clone(), value));
+                value
+            }
+            _ => value,
+        }
+    }
 }
 
-pub fn lower_function(func: &Function) -> ControlFlowGraph<Value> {
-    let mut translator = Tranlsator::default();
-
-    let entry = translator.create_block();
-    translator.ssa.seal(entry);
-    translator.ssa.switch_block(entry);
-    translator.cur_block = Some(entry);
+pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
+    let mut translator = Tranlsator::new(ast, func);
 
     let mut params = Vec::new();
     for param in &func.params {
@@ -117,15 +149,22 @@ pub fn lower_function(func: &Function) -> ControlFlowGraph<Value> {
         lower_stmt(&mut translator, stmt);
     }
 
+    dbg!(&translator.ssa);
+
     let mut blocks = HashMap::new();
     for (id, mut instructions) in translator.blocks {
+        dbg!(&id);
+
         for ins in &mut instructions {
+            dbg!(&ins);
             match ins {
                 Instruction::Brif(_, then_block, then_args, else_block, else_args) => {
+                    dbg!(&then_block, &else_block);
                     then_args.extend(translator.ssa.branch_args(id, *then_block));
                     else_args.extend(translator.ssa.branch_args(id, *else_block));
                 }
                 Instruction::Jmp(block, args) => {
+                    dbg!(&block);
                     args.extend(translator.ssa.branch_args(id, *block));
                 }
                 _ => {}
@@ -141,11 +180,14 @@ pub fn lower_function(func: &Function) -> ControlFlowGraph<Value> {
         );
     }
 
-    let cfg = ControlFlowGraph { entry, blocks };
-
-    let regcfg = reg::ssa_to_reg(&cfg);
+    let cfg = ControlFlowGraph {
+        entry: translator.entry,
+        blocks,
+    };
 
     println!("{}", cfg);
+    let regcfg = reg::ssa_to_reg(&cfg);
+
     println!("{}", regcfg);
 
     let func = FuncInfo {
@@ -165,7 +207,15 @@ pub fn lower_function(func: &Function) -> ControlFlowGraph<Value> {
 
 fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
     match stmt {
-        Statement::Define(def) => {}
+        Statement::Define(def) => {
+            let var = translator.ssa.create_var();
+            translator.variables.insert(def.name.clone(), var);
+
+            if let Some(expr) = &def.value {
+                let value = lower_expr(translator, expr);
+                translator.ssa.def_var(var, value);
+            }
+        }
         Statement::Expr(expr) => {
             lower_expr(translator, expr);
         }
@@ -203,7 +253,38 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
         Statement::While {
             condition,
             then_block,
-        } => {}
+        } => {
+            let cond_block = translator.create_block();
+            let body_block = translator.create_block();
+            let merge_block = translator.create_block();
+
+            translator.push_ins(Instruction::Jmp(cond_block, Vec::new()));
+            translator.ssa.branch(&[cond_block]);
+
+            translator.switch_to_block(cond_block);
+            let condition = load_place_expr(translator, condition);
+            translator.push_ins(Instruction::Brif(
+                condition,
+                body_block,
+                Vec::new(),
+                merge_block,
+                Vec::new(),
+            ));
+            translator.ssa.branch(&[body_block, merge_block]);
+
+            translator.ssa.seal(body_block);
+            translator.switch_to_block(body_block);
+            for stmt in then_block {
+                lower_stmt(translator, stmt);
+            }
+
+            translator.push_ins(Instruction::Jmp(cond_block, Vec::new()));
+            translator.ssa.branch(&[cond_block]);
+            translator.ssa.seal(cond_block);
+
+            translator.ssa.seal(merge_block);
+            translator.switch_to_block(merge_block);
+        }
         Statement::Return(expr) => {
             let value = match expr {
                 Some(expr) => lower_expr(translator, expr),
@@ -222,93 +303,131 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             value
         }
         Expr::Ident { ident } => {
-            let var = translator.get_or_create_var(ident);
-            let value = translator.ssa.use_var(var);
+            // Identifier is a regular stack-local variable.
+            if let Some(var) = translator.variables.get(ident) {
+                let value = translator.ssa.use_var(*var);
+                return value;
+            }
+
+            // Identifier is the name of a global variable, property or function
+            // of the current class or a parent class.
+            if let Some(global) = translator.ast.globals.iter().find(|v| v.name == *ident) {
+                let value = translator.ssa.create_value();
+                translator
+                    .types
+                    .insert(value, DynType::PlaceGlobal(global.name.clone()));
+                return value;
+            }
+
+            if let Some(func) = translator.ast.functions.iter().find(|v| v.name == *ident) {
+                let value = translator.ssa.create_value();
+                translator
+                    .types
+                    .insert(value, DynType::Func(func.name.clone()));
+                return value;
+            }
+
+            // Otherwise the identifier is a plain type/value name that needs to
+            // be reconstructed into a value by a deref operation.
+            let value = translator.ssa.create_value();
+            translator
+                .types
+                .insert(value, DynType::Path(ident.to_owned()));
             value
         }
         Expr::Add { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Add(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::Sub { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Sub(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::Mul { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Mul(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::Div { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Div(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::Rem { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Rem(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpEq { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::CmpEq(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpNe { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::CmpNe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpLt { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::CmpLt(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpLe { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::CmpLe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpGt { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::CmpGt(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpGe { lhs, rhs } => {
-            let lhs = lower_expr(translator, lhs);
-            let rhs = lower_expr(translator, rhs);
+            let lhs = load_place_expr(translator, lhs);
+            let rhs = load_place_expr(translator, rhs);
             let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::CmpGt(Binop { lhs, rhs, dst }));
+            translator.push_ins(Instruction::CmpGe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::Call { callee, args } => {
             let callee = lower_expr(translator, callee);
-            let args: Vec<_> = args.iter().map(|arg| lower_expr(translator, arg)).collect();
+            let callee = translator
+                .types
+                .get(&callee)
+                .unwrap()
+                .unwrap_func()
+                .to_owned();
+
+            let args: Vec<_> = args
+                .iter()
+                .map(|arg| load_place_expr(translator, arg))
+                .collect();
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Call(Call {
-                callee,
+                callee: callee.clone(),
                 args,
                 returns: dst,
             }));
@@ -317,9 +436,13 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         Expr::Deref { lhs, rhs } => {
             let lhs = lower_expr(translator, lhs);
             let rhs = lower_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Deref(Binop { lhs, rhs, dst }));
-            dst
+            let (Some(DynType::Path(lhs)), Some(DynType::Path(rhs))) =
+                (translator.types.get(&lhs), translator.types.get(&rhs))
+            else {
+                unreachable!();
+            };
+
+            todo!();
         }
         Expr::Index { array, index } => {
             let lhs = lower_expr(translator, array);
@@ -329,45 +452,46 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             dst
         }
         Expr::Assign { src, dst } => {
-            let src = lower_expr(translator, src);
+            let src = load_place_expr(translator, src);
+            let src = translator.load_place(src);
             store_maybe_place(translator, src, dst);
             translator.ssa.create_value()
         }
         Expr::AddAssign { src, dst } => {
-            let lhs = lower_expr(translator, dst);
-            let rhs = lower_expr(translator, src);
+            let lhs = load_place_expr(translator, dst);
+            let rhs = load_place_expr(translator, src);
             let res = translator.ssa.create_value();
             translator.push_ins(Instruction::Add(Binop { lhs, rhs, dst: res }));
             store_maybe_place(translator, res, dst);
             translator.ssa.create_value()
         }
         Expr::SubAssign { src, dst } => {
-            let lhs = lower_expr(translator, dst);
-            let rhs = lower_expr(translator, src);
+            let lhs = load_place_expr(translator, dst);
+            let rhs = load_place_expr(translator, src);
             let res = translator.ssa.create_value();
             translator.push_ins(Instruction::Sub(Binop { lhs, rhs, dst: res }));
             store_maybe_place(translator, res, dst);
             translator.ssa.create_value()
         }
         Expr::MulAssign { src, dst } => {
-            let lhs = lower_expr(translator, dst);
-            let rhs = lower_expr(translator, src);
+            let lhs = load_place_expr(translator, dst);
+            let rhs = load_place_expr(translator, src);
             let res = translator.ssa.create_value();
             translator.push_ins(Instruction::Mul(Binop { lhs, rhs, dst: res }));
             store_maybe_place(translator, res, dst);
             translator.ssa.create_value()
         }
         Expr::DivAssign { src, dst } => {
-            let lhs = lower_expr(translator, dst);
-            let rhs = lower_expr(translator, src);
+            let lhs = load_place_expr(translator, dst);
+            let rhs = load_place_expr(translator, src);
             let res = translator.ssa.create_value();
             translator.push_ins(Instruction::Div(Binop { lhs, rhs, dst: res }));
             store_maybe_place(translator, res, dst);
             translator.ssa.create_value()
         }
         Expr::RemAssign { src, dst } => {
-            let lhs = lower_expr(translator, dst);
-            let rhs = lower_expr(translator, src);
+            let lhs = load_place_expr(translator, dst);
+            let rhs = load_place_expr(translator, src);
             let res = translator.ssa.create_value();
             translator.push_ins(Instruction::Rem(Binop { lhs, rhs, dst: res }));
             store_maybe_place(translator, res, dst);
@@ -375,6 +499,11 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         }
         x => todo!("{:?}", expr),
     }
+}
+
+fn load_place_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
+    let place = lower_expr(translator, expr);
+    translator.load_place(place)
 }
 
 fn store_maybe_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
@@ -399,4 +528,21 @@ pub struct FuncInfo {
 struct Param<T> {
     ty: Type,
     value: T,
+}
+
+#[derive(Clone, Debug)]
+enum DynType {
+    /// A partial segment to a value.
+    Path(String),
+    Func(String),
+    PlaceGlobal(String),
+}
+
+impl DynType {
+    fn unwrap_func(&self) -> &str {
+        match self {
+            Self::Func(f) => f,
+            _ => unreachable!(),
+        }
+    }
 }

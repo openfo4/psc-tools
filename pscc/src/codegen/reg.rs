@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
-use crate::codegen::{Binop, Instruction, Param, Unop};
+use crate::codegen::{Binop, Call, Instruction, Param, Unop};
 
 pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
     let dfg = DataFlowGraph::new(cfg);
@@ -30,9 +30,21 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                 Instruction::AddParams(params) => {
                     let params = params
                         .iter()
-                        .map(|param| Param {
-                            ty: param.ty.clone(),
-                            value: regs.alloc(param.value),
+                        .map(|param| {
+                            let value = regs.alloc(param.value);
+
+                            // If there are no instructions actually using the parameter
+                            // we can immediately retire it again.
+                            // Dead parameters are not removed by the optimizer because
+                            // it would change the function signature.
+                            if dfg.uses(param.value).is_empty() {
+                                regs.try_retire(param.value);
+                            }
+
+                            Param {
+                                ty: param.ty.clone(),
+                                value,
+                            }
                         })
                         .collect();
                     Instruction::AddParams(params)
@@ -50,6 +62,15 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                     rhs: regs.get(op.rhs),
                     dst: regs.alloc(op.dst),
                 }),
+                Instruction::Call(op) => {
+                    let args = op.args.iter().map(|arg| regs.get(*arg)).collect();
+
+                    Instruction::Call(Call {
+                        callee: op.callee.clone(),
+                        args,
+                        returns: regs.alloc(op.returns),
+                    })
+                }
                 Instruction::Return(value) => Instruction::Return(regs.get(*value)),
                 Instruction::Brif(
                     condition,
@@ -100,6 +121,10 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                     }
 
                     Instruction::Jmp(*block_id, Vec::new())
+                }
+                Instruction::LoadGlobal(name, dst) => {
+                    let reg = regs.alloc(*dst);
+                    Instruction::LoadGlobal(name.clone(), reg)
                 }
                 x => todo!("{:?}", x),
             };
@@ -217,7 +242,18 @@ where
         Instruction::AddParams(_) => {}
         Instruction::Literal(_, _) => {}
         Instruction::Add(op) => binop(op),
+        Instruction::Sub(op) => binop(op),
+        Instruction::Mul(op) => binop(op),
+        Instruction::Div(op) => binop(op),
+        Instruction::Rem(op) => binop(op),
         Instruction::CmpEq(op) => binop(op),
+        Instruction::CmpNe(op) => binop(op),
+        Instruction::CmpLt(op) => binop(op),
+        Instruction::CmpLe(op) => binop(op),
+        Instruction::CmpGt(op) => binop(op),
+        Instruction::CmpGe(op) => binop(op),
+        Instruction::Deref(op) => binop(op),
+        Instruction::Index(op) => binop(op),
         Instruction::Brif(condition, _, then_args, _, else_args) => {
             f(*condition);
             for arg in then_args.iter().chain(else_args) {
@@ -230,6 +266,12 @@ where
             }
         }
         Instruction::Return(value) => f(*value),
+        Instruction::Call(op) => {
+            for arg in &op.args {
+                f(*arg);
+            }
+        }
+        Instruction::LoadGlobal(_, _) => {}
         x => todo!("{:?}", x),
     }
 }

@@ -16,7 +16,13 @@ impl<T> ControlFlowGraph<T> {
         F: FnMut(BlockId, &Block<T>),
     {
         let mut queue: VecDeque<_> = vec![self.entry].into();
+        let mut visited = HashSet::new();
+
         while let Some(id) = queue.pop_front() {
+            if !visited.insert(id) {
+                continue;
+            }
+
             let block = &self.blocks[&id];
             visitor(id, block);
 
@@ -160,6 +166,9 @@ where
                         writeln!(f, "{} = {}", op.dst, op.src)?;
                     }
                     Instruction::Return(value) => writeln!(f, "ret {}", value)?,
+                    Instruction::LoadGlobal(name, dst) => {
+                        writeln!(f, "{} = load_global {}", dst, name)?
+                    }
                 }
             }
         }
@@ -184,8 +193,6 @@ impl DataFlowGraph {
     pub fn new(cfg: &ControlFlowGraph<Value>) -> Self {
         let mut defs = HashMap::new();
         let mut uses = HashMap::<_, Vec<_>>::new();
-
-        dbg!(&cfg);
 
         cfg.visit_bfs(|id, block| {
             for value in &block.params {
@@ -226,7 +233,6 @@ impl DataFlowGraph {
                         defs.insert(op.dst, loc);
                     }
                     Instruction::Call(op) => {
-                        uses.entry(op.callee).or_default().push(loc);
                         for arg in &op.args {
                             uses.entry(*arg).or_default().push(loc);
                         }
@@ -246,6 +252,9 @@ impl DataFlowGraph {
                             uses.entry(*arg).or_default().push(loc);
                         }
                     }
+                    Instruction::LoadGlobal(_, dst) => {
+                        defs.insert(*dst, loc);
+                    }
                 }
             }
         });
@@ -258,7 +267,10 @@ impl DataFlowGraph {
     }
 
     pub fn uses(&self, value: Value) -> &[(BlockId, usize)] {
-        &self.uses[&value]
+        self.uses
+            .get(&value)
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
     }
 }
 

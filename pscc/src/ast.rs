@@ -1,5 +1,6 @@
 use crate::lexer::Literal;
 
+#[derive(Clone, Debug)]
 pub struct Ast {
     pub script_name: String,
     pub extends: String,
