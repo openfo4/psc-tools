@@ -476,6 +476,9 @@ impl<'a> Parser<'a> {
                     then_block.push(stmt);
                 }
 
+                self.consume_next(&[ParseToken::Keyword(Keyword::EndWhile)])?;
+                self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
+
                 Ok(Statement::While {
                     condition,
                     then_block,
