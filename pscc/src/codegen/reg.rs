@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
-use crate::codegen::{Binop, Call, Instruction, Param, Unop};
+use crate::codegen::{Binop, Call, Cast, Instruction, Param, Unop};
 
 pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
     let dfg = DataFlowGraph::new(cfg);
@@ -52,7 +52,7 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                 Instruction::Literal(lit, dst) => {
                     Instruction::Literal(lit.clone(), regs.alloc(*dst))
                 }
-                Instruction::Add(op) => Instruction::Add(Binop {
+                Instruction::IAdd(op) => Instruction::IAdd(Binop {
                     lhs: regs.get(op.lhs),
                     rhs: regs.get(op.rhs),
                     dst: regs.alloc(op.dst),
@@ -126,6 +126,12 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                     let reg = regs.alloc(*dst);
                     Instruction::LoadGlobal(name.clone(), reg)
                 }
+                Instruction::Cast(op) => Instruction::Cast(Cast {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                    src_ty: op.src_ty.clone(),
+                    dst_ty: op.dst_ty.clone(),
+                }),
                 x => todo!("{:?}", x),
             };
 
@@ -241,11 +247,11 @@ where
     match ins {
         Instruction::AddParams(_) => {}
         Instruction::Literal(_, _) => {}
-        Instruction::Add(op) => binop(op),
-        Instruction::Sub(op) => binop(op),
-        Instruction::Mul(op) => binop(op),
-        Instruction::Div(op) => binop(op),
-        Instruction::Rem(op) => binop(op),
+        Instruction::IAdd(op) => binop(op),
+        Instruction::ISub(op) => binop(op),
+        Instruction::IMul(op) => binop(op),
+        Instruction::IDiv(op) => binop(op),
+        Instruction::IRem(op) => binop(op),
         Instruction::CmpEq(op) => binop(op),
         Instruction::CmpNe(op) => binop(op),
         Instruction::CmpLt(op) => binop(op),
@@ -272,6 +278,9 @@ where
             }
         }
         Instruction::LoadGlobal(_, _) => {}
+        Instruction::Cast(op) => {
+            f(op.src);
+        }
         x => todo!("{:?}", x),
     }
 }

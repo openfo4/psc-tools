@@ -94,11 +94,36 @@ where
                         writeln!(f, "params {}", params)?;
                     }
                     Instruction::Literal(lit, dst) => writeln!(f, "{} = const {:?}", dst, lit)?,
-                    Instruction::Add(op) => writeln!(f, "{} = add {} {}", op.dst, op.lhs, op.rhs)?,
-                    Instruction::Sub(op) => writeln!(f, "{} = sub {} {}", op.dst, op.lhs, op.rhs)?,
-                    Instruction::Mul(op) => writeln!(f, "{} = mul {} {}", op.dst, op.lhs, op.rhs)?,
-                    Instruction::Div(op) => writeln!(f, "{} = div {} {}", op.dst, op.lhs, op.rhs)?,
-                    Instruction::Rem(op) => writeln!(f, "{} = rem {} {}", op.dst, op.lhs, op.rhs)?,
+                    Instruction::IAdd(op) => {
+                        writeln!(f, "{} = iadd {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::ISub(op) => {
+                        writeln!(f, "{} = isub {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::IMul(op) => {
+                        writeln!(f, "{} = imul {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::IDiv(op) => {
+                        writeln!(f, "{} = idiv {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::IRem(op) => {
+                        writeln!(f, "{} = irem {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::FAdd(op) => {
+                        writeln!(f, "{} = fadd {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::FSub(op) => {
+                        writeln!(f, "{} = fsub {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::FMul(op) => {
+                        writeln!(f, "{} = fmul {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::FDiv(op) => {
+                        writeln!(f, "{} = fdiv {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::FRem(op) => {
+                        writeln!(f, "{} = frem {} {}", op.dst, op.lhs, op.rhs)?
+                    }
                     Instruction::CmpEq(op) => {
                         writeln!(f, "{} = cmpeq {} {}", op.dst, op.lhs, op.rhs)?
                     }
@@ -169,6 +194,16 @@ where
                     Instruction::LoadGlobal(name, dst) => {
                         writeln!(f, "{} = load_global {}", dst, name)?
                     }
+                    Instruction::Cast(op) => {
+                        writeln!(
+                            f,
+                            "{} = cast {} {:?} {:?}",
+                            op.dst, op.src, op.src_ty, op.dst_ty
+                        )?;
+                    }
+                    Instruction::StringConcat(op) => {
+                        writeln!(f, "{} = string_concat {} {}", op.dst, op.lhs, op.rhs)?;
+                    }
                 }
             }
         }
@@ -211,11 +246,16 @@ impl DataFlowGraph {
                     Instruction::Literal(_, dst) => {
                         defs.insert(*dst, loc);
                     }
-                    Instruction::Add(op)
-                    | Instruction::Sub(op)
-                    | Instruction::Mul(op)
-                    | Instruction::Div(op)
-                    | Instruction::Rem(op)
+                    Instruction::IAdd(op)
+                    | Instruction::ISub(op)
+                    | Instruction::IMul(op)
+                    | Instruction::IDiv(op)
+                    | Instruction::IRem(op)
+                    | Instruction::FAdd(op)
+                    | Instruction::FSub(op)
+                    | Instruction::FMul(op)
+                    | Instruction::FDiv(op)
+                    | Instruction::FRem(op)
                     | Instruction::CmpEq(op)
                     | Instruction::CmpNe(op)
                     | Instruction::CmpLt(op)
@@ -223,7 +263,8 @@ impl DataFlowGraph {
                     | Instruction::CmpGt(op)
                     | Instruction::CmpGe(op)
                     | Instruction::Deref(op)
-                    | Instruction::Index(op) => {
+                    | Instruction::Index(op)
+                    | Instruction::StringConcat(op) => {
                         uses.entry(op.lhs).or_default().push(loc);
                         uses.entry(op.rhs).or_default().push(loc);
                         defs.insert(op.dst, loc);
@@ -254,6 +295,10 @@ impl DataFlowGraph {
                     }
                     Instruction::LoadGlobal(_, dst) => {
                         defs.insert(*dst, loc);
+                    }
+                    Instruction::Cast(op) => {
+                        uses.entry(op.src).or_default().push(loc);
+                        defs.insert(op.dst, loc);
                     }
                 }
             }

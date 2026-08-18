@@ -120,7 +120,7 @@ pub struct Assign {
     pub dst: Expr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     Define(Define),
     Expr(Expr),
@@ -135,13 +135,13 @@ pub enum Statement {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConditionBlock {
     pub condition: Expr,
     pub statements: Vec<Statement>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Define {
     pub ty: Type,
     pub name: String,

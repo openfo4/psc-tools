@@ -3,8 +3,7 @@ mod lowering;
 mod reg;
 mod ssa;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::{self, Display, Formatter};
+use std::collections::HashMap;
 
 use crate::ast::{Ast, Expr, Function, Statement, Type};
 use crate::codegen::func::{Block, ControlFlowGraph};
@@ -16,11 +15,16 @@ use crate::lexer::Literal;
 pub enum Instruction<T> {
     AddParams(Vec<Param<T>>),
     Literal(Literal<'static>, T),
-    Add(Binop<T>),
-    Sub(Binop<T>),
-    Mul(Binop<T>),
-    Div(Binop<T>),
-    Rem(Binop<T>),
+    IAdd(Binop<T>),
+    ISub(Binop<T>),
+    IMul(Binop<T>),
+    IDiv(Binop<T>),
+    IRem(Binop<T>),
+    FAdd(Binop<T>),
+    FSub(Binop<T>),
+    FMul(Binop<T>),
+    FDiv(Binop<T>),
+    FRem(Binop<T>),
     CmpEq(Binop<T>),
     CmpNe(Binop<T>),
     CmpLt(Binop<T>),
@@ -35,6 +39,8 @@ pub enum Instruction<T> {
     Store(Unop<T>),
     Return(T),
     LoadGlobal(String, T),
+    Cast(Cast<T>),
+    StringConcat(Binop<T>),
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +64,14 @@ struct Call<T> {
 }
 
 #[derive(Clone, Debug)]
+struct Cast<T> {
+    pub src: T,
+    pub dst: T,
+    src_ty: DynType,
+    dst_ty: DynType,
+}
+
+#[derive(Clone, Debug)]
 struct Tranlsator<'a> {
     ssa: SsaBuilder,
     variables: HashMap<String, Var>,
@@ -67,6 +81,7 @@ struct Tranlsator<'a> {
     ast: &'a Ast,
     func: &'a Function,
     types: HashMap<Value, DynType>,
+    var_types: HashMap<Var, DynType>,
 }
 
 impl<'a> Tranlsator<'a> {
@@ -88,6 +103,7 @@ impl<'a> Tranlsator<'a> {
             func,
             entry,
             types: HashMap::new(),
+            var_types: HashMap::new(),
         }
     }
 
@@ -119,12 +135,20 @@ impl<'a> Tranlsator<'a> {
     fn load_place(&mut self, value: Value) -> Value {
         match self.types.get(&value) {
             Some(DynType::PlaceGlobal(global)) => {
-                let value = self.ssa.create_value();
-                self.push_ins(Instruction::LoadGlobal(global.clone(), value));
+                let global = self.ast.globals.iter().find(|v| &v.name == global).unwrap();
+
+                let value = self.create_value(DynType::from(&global.ty));
+                self.push_ins(Instruction::LoadGlobal(global.name.clone(), value));
                 value
             }
             _ => value,
         }
+    }
+
+    fn create_value(&mut self, ty: DynType) -> Value {
+        let value = self.ssa.create_value();
+        self.types.insert(value, ty);
+        value
     }
 }
 
@@ -134,7 +158,7 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
     let mut params = Vec::new();
     for param in &func.params {
         let var = translator.get_or_create_var(&param.name);
-        let value = translator.ssa.create_value();
+        let value = translator.create_value(DynType::from(&param.ty));
         translator.ssa.def_var(var, value);
 
         params.push(Param {
@@ -149,22 +173,15 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
         lower_stmt(&mut translator, stmt);
     }
 
-    dbg!(&translator.ssa);
-
     let mut blocks = HashMap::new();
     for (id, mut instructions) in translator.blocks {
-        dbg!(&id);
-
         for ins in &mut instructions {
-            dbg!(&ins);
             match ins {
                 Instruction::Brif(_, then_block, then_args, else_block, else_args) => {
-                    dbg!(&then_block, &else_block);
                     then_args.extend(translator.ssa.branch_args(id, *then_block));
                     else_args.extend(translator.ssa.branch_args(id, *else_block));
                 }
                 Instruction::Jmp(block, args) => {
-                    dbg!(&block);
                     args.extend(translator.ssa.branch_args(id, *block));
                 }
                 _ => {}
@@ -197,8 +214,6 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
         return_ty: func.return_ty.clone(),
     };
 
-    dbg!("f");
-
     let f = lowering::lower_to_pex(&func);
     dbg!(&f);
 
@@ -210,6 +225,8 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
         Statement::Define(def) => {
             let var = translator.ssa.create_var();
             translator.variables.insert(def.name.clone(), var);
+
+            translator.var_types.insert(var, DynType::from(&def.ty));
 
             if let Some(expr) = &def.value {
                 let value = lower_expr(translator, expr);
@@ -298,7 +315,16 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
 fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
     match expr {
         Expr::Literal(literal) => {
-            let value = translator.ssa.create_value();
+            let ty = match literal {
+                Literal::NumberInt(_) => DynType::Int,
+                Literal::NumberDecimal {
+                    integer: _,
+                    fraction: _,
+                } => DynType::Float,
+                Literal::String(_) => DynType::String,
+            };
+
+            let value = translator.create_value(ty);
             translator.push_ins(Instruction::Literal(literal.clone(), value));
             value
         }
@@ -336,39 +362,19 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             value
         }
         Expr::Add { lhs, rhs } => {
-            let lhs = load_place_expr(translator, lhs);
-            let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Add(Binop { lhs, rhs, dst }));
-            dst
+            lower_arithmetic_binop(translator, ArithmeticBinop::Add, lhs, rhs)
         }
         Expr::Sub { lhs, rhs } => {
-            let lhs = load_place_expr(translator, lhs);
-            let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Sub(Binop { lhs, rhs, dst }));
-            dst
+            lower_arithmetic_binop(translator, ArithmeticBinop::Sub, lhs, rhs)
         }
         Expr::Mul { lhs, rhs } => {
-            let lhs = load_place_expr(translator, lhs);
-            let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Mul(Binop { lhs, rhs, dst }));
-            dst
+            lower_arithmetic_binop(translator, ArithmeticBinop::Mul, lhs, rhs)
         }
         Expr::Div { lhs, rhs } => {
-            let lhs = load_place_expr(translator, lhs);
-            let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Div(Binop { lhs, rhs, dst }));
-            dst
+            lower_arithmetic_binop(translator, ArithmeticBinop::Mul, lhs, rhs)
         }
         Expr::Rem { lhs, rhs } => {
-            let lhs = load_place_expr(translator, lhs);
-            let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Rem(Binop { lhs, rhs, dst }));
-            dst
+            lower_arithmetic_binop(translator, ArithmeticBinop::Div, lhs, rhs)
         }
         Expr::CmpEq { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
@@ -453,52 +459,55 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         }
         Expr::Assign { src, dst } => {
             let src = load_place_expr(translator, src);
-            let src = translator.load_place(src);
-            store_maybe_place(translator, src, dst);
-            translator.ssa.create_value()
+            store_place(translator, src, dst);
+            translator.create_value(DynType::None)
         }
         Expr::AddAssign { src, dst } => {
-            let lhs = load_place_expr(translator, dst);
-            let rhs = load_place_expr(translator, src);
-            let res = translator.ssa.create_value();
-            translator.push_ins(Instruction::Add(Binop { lhs, rhs, dst: res }));
-            store_maybe_place(translator, res, dst);
-            translator.ssa.create_value()
+            let res = lower_arithmetic_binop(translator, ArithmeticBinop::Add, dst, src);
+            store_place(translator, res, dst);
+            translator.create_value(DynType::None)
         }
         Expr::SubAssign { src, dst } => {
-            let lhs = load_place_expr(translator, dst);
-            let rhs = load_place_expr(translator, src);
-            let res = translator.ssa.create_value();
-            translator.push_ins(Instruction::Sub(Binop { lhs, rhs, dst: res }));
-            store_maybe_place(translator, res, dst);
-            translator.ssa.create_value()
+            let res = lower_arithmetic_binop(translator, ArithmeticBinop::Sub, dst, src);
+            store_place(translator, res, dst);
+            translator.create_value(DynType::None)
         }
         Expr::MulAssign { src, dst } => {
-            let lhs = load_place_expr(translator, dst);
-            let rhs = load_place_expr(translator, src);
-            let res = translator.ssa.create_value();
-            translator.push_ins(Instruction::Mul(Binop { lhs, rhs, dst: res }));
-            store_maybe_place(translator, res, dst);
-            translator.ssa.create_value()
+            let res = lower_arithmetic_binop(translator, ArithmeticBinop::Mul, dst, src);
+            store_place(translator, res, dst);
+            translator.create_value(DynType::None)
         }
         Expr::DivAssign { src, dst } => {
-            let lhs = load_place_expr(translator, dst);
-            let rhs = load_place_expr(translator, src);
-            let res = translator.ssa.create_value();
-            translator.push_ins(Instruction::Div(Binop { lhs, rhs, dst: res }));
-            store_maybe_place(translator, res, dst);
-            translator.ssa.create_value()
+            let res = lower_arithmetic_binop(translator, ArithmeticBinop::Div, dst, src);
+            store_place(translator, res, dst);
+            translator.create_value(DynType::None)
         }
         Expr::RemAssign { src, dst } => {
-            let lhs = load_place_expr(translator, dst);
-            let rhs = load_place_expr(translator, src);
-            let res = translator.ssa.create_value();
-            translator.push_ins(Instruction::Rem(Binop { lhs, rhs, dst: res }));
-            store_maybe_place(translator, res, dst);
-            translator.ssa.create_value()
+            let res = lower_arithmetic_binop(translator, ArithmeticBinop::Rem, dst, src);
+            store_place(translator, res, dst);
+            translator.create_value(DynType::None)
         }
         x => todo!("{:?}", expr),
     }
+}
+
+fn convert_to(translator: &mut Tranlsator, src: Value, want: DynType) -> Value {
+    let is = &translator.types[&src];
+    if *is == want {
+        return src;
+    }
+
+    let is = is.clone();
+
+    let dst = translator.create_value(want.clone());
+    translator.push_ins(Instruction::Cast(Cast {
+        src,
+        dst,
+        src_ty: is,
+        dst_ty: want,
+    }));
+
+    dst
 }
 
 fn load_place_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
@@ -506,14 +515,83 @@ fn load_place_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
     translator.load_place(place)
 }
 
-fn store_maybe_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
+/// Stores the given `value` into the given place expression `dst`.
+fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
+    // The place is a local on-stack variable.
     if let Expr::Ident { ident } = dst {
-        let var = translator.get_or_create_var(ident);
+        let var = translator.variables[ident];
+        let want_ty = &translator.var_types[&var];
+        let value = convert_to(translator, value, want_ty.clone());
         translator.ssa.def_var(var, value);
-    } else {
-        let dst = lower_expr(translator, dst);
-        translator.push_ins(Instruction::Store(Unop { src: value, dst }));
+        return;
     }
+
+    todo!();
+}
+
+fn lower_arithmetic_binop(
+    translator: &mut Tranlsator,
+    op: ArithmeticBinop,
+    lhs: &Expr,
+    rhs: &Expr,
+) -> Value {
+    let lhs = load_place_expr(translator, lhs);
+    let rhs = load_place_expr(translator, rhs);
+
+    dbg!(&translator);
+    dbg!(lhs, rhs);
+
+    let lhs_ty = &translator.types[&lhs];
+    let rhs_ty = &translator.types[&rhs];
+
+    // Only the add operator is allows for strings.
+    if op == ArithmeticBinop::Add {
+        if *lhs_ty == DynType::String || *rhs_ty == DynType::String {
+            let lhs = convert_to(translator, lhs, DynType::String);
+            let rhs = convert_to(translator, rhs, DynType::String);
+            let dst = translator.create_value(DynType::String);
+            translator.push_ins(Instruction::StringConcat(Binop { lhs, rhs, dst }));
+            return dst;
+        }
+    }
+
+    if *lhs_ty == DynType::Float || *rhs_ty == DynType::Float {
+        let lhs = convert_to(translator, lhs, DynType::Float);
+        let rhs = convert_to(translator, rhs, DynType::Float);
+        let dst = translator.create_value(DynType::Float);
+
+        let ins = match op {
+            ArithmeticBinop::Add => Instruction::FAdd(Binop { lhs, rhs, dst }),
+            ArithmeticBinop::Sub => Instruction::FSub(Binop { lhs, rhs, dst }),
+            ArithmeticBinop::Mul => Instruction::FMul(Binop { lhs, rhs, dst }),
+            ArithmeticBinop::Div => Instruction::FMul(Binop { lhs, rhs, dst }),
+            ArithmeticBinop::Rem => Instruction::FRem(Binop { lhs, rhs, dst }),
+        };
+
+        translator.push_ins(ins);
+        return dst;
+    }
+
+    let dst = translator.create_value(DynType::Int);
+    let ins = match op {
+        ArithmeticBinop::Add => Instruction::IAdd(Binop { lhs, rhs, dst }),
+        ArithmeticBinop::Sub => Instruction::ISub(Binop { lhs, rhs, dst }),
+        ArithmeticBinop::Mul => Instruction::IMul(Binop { lhs, rhs, dst }),
+        ArithmeticBinop::Div => Instruction::IMul(Binop { lhs, rhs, dst }),
+        ArithmeticBinop::Rem => Instruction::IRem(Binop { lhs, rhs, dst }),
+    };
+
+    translator.push_ins(ins);
+    dst
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+enum ArithmeticBinop {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
 }
 
 #[derive(Clone, Debug)]
@@ -530,12 +608,28 @@ struct Param<T> {
     value: T,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum DynType {
+    None,
+    Bool,
+    Int,
+    Float,
+    String,
     /// A partial segment to a value.
     Path(String),
     Func(String),
     PlaceGlobal(String),
+}
+
+impl From<&Type> for DynType {
+    fn from(value: &Type) -> Self {
+        match value {
+            Type::Ty(ty) if ty.eq_ignore_ascii_case("int") => Self::Int,
+            Type::Ty(ty) if ty.eq_ignore_ascii_case("float") => Self::Float,
+            Type::Ty(ty) if ty.eq_ignore_ascii_case("string") => Self::String,
+            _ => todo!(),
+        }
+    }
 }
 
 impl DynType {

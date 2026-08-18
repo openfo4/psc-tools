@@ -1,10 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hint::black_box;
 
-use crate::codegen::func::{Block, DataFlowGraph};
-use crate::codegen::reg::Register;
 use crate::codegen::ssa::BlockId;
-use crate::codegen::{ControlFlowGraph, FuncInfo, Instruction, ssa};
+use crate::codegen::{ControlFlowGraph, FuncInfo, Instruction};
 use crate::lexer::Literal;
 
 use pex::{ConditionalBranch, Instruction as PexInstruction, Unop, Value};
@@ -52,7 +49,7 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                     src: Value::Ident(op.src.to_string()),
                     dst: Value::Ident(op.dst.to_string()),
                 }),
-                Instruction::Add(op) => pex::Instruction::IAdd(pex::Binop {
+                Instruction::IAdd(op) => pex::Instruction::IAdd(pex::Binop {
                     lhs: Value::Ident(op.lhs.to_string()),
                     rhs: Value::Ident(op.rhs.to_string()),
                     dst: Value::Ident(op.dst.to_string()),
