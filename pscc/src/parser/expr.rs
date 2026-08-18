@@ -8,7 +8,18 @@ impl<'a> Parser<'a> {
     pub fn parse_expr(&mut self) -> Result<Expr, Error<'a>> {
         let mut stacks = vec![ExprParseStack::default()];
 
-        while let Some(token) = self.consume() {
+        while let Some(token) = self.peek() {
+            // Some tokens are only allowed in an interior place as part of an expression
+            // (e.g. ',' is only allowed when a function call is open, ')' is only allowed
+            // when an '(' existed before).
+            // These tokens indicate that the expression is over.
+            // Note that we must not consume the token itself.
+            if matches!(token.kind, TokenKind::Comma | TokenKind::CloseParen) && stacks.len() == 1 {
+                break;
+            }
+
+            self.consume();
+
             let mut stack = stacks.last_mut().unwrap();
 
             match &token.kind {
@@ -555,5 +566,32 @@ mod tests {
                 })
             }
         );
+    }
+
+    #[test]
+    fn parse_expr_until_comma() {
+        let tokens = [
+            token(TokenKind::Ident("x")),
+            token(TokenKind::OpenParen),
+            token(TokenKind::Ident("y")),
+            token(TokenKind::Comma),
+            token(TokenKind::CloseParen),
+            token(TokenKind::Comma),
+        ];
+        let mut parser = Parser::new(&tokens);
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            Expr::Call {
+                callee: Box::new(Expr::Ident {
+                    ident: "x".to_owned()
+                }),
+                args: vec![Expr::Ident {
+                    ident: "y".to_owned()
+                }]
+            }
+        );
+        assert_eq!(parser.tokens[0], token(TokenKind::Comma));
     }
 }
