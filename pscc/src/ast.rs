@@ -29,8 +29,31 @@ pub struct Property {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
+    None,
+    Bool,
+    Int,
+    Float,
+    String,
     Ty(String),
     Array(Box<Type>),
+}
+
+impl Type {
+    pub fn new(s: &str) -> Self {
+        if s.eq_ignore_ascii_case("none") {
+            Self::None
+        } else if s.eq_ignore_ascii_case("bool") {
+            Self::Bool
+        } else if s.eq_ignore_ascii_case("int") {
+            Self::Int
+        } else if s.eq_ignore_ascii_case("float") {
+            Self::Float
+        } else if s.eq_ignore_ascii_case("string") {
+            Self::String
+        } else {
+            Self::Ty(s.to_owned())
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -39,6 +62,26 @@ impl std::fmt::Display for Type {
         let mut array_depth = 0;
         loop {
             match t {
+                Self::None => {
+                    write!(f, "none")?;
+                    break;
+                }
+                Self::Bool => {
+                    write!(f, "bool")?;
+                    break;
+                }
+                Self::Int => {
+                    write!(f, "int")?;
+                    break;
+                }
+                Self::Float => {
+                    write!(f, "float")?;
+                    break;
+                }
+                Self::String => {
+                    write!(f, "string")?;
+                    break;
+                }
                 Self::Ty(name) => {
                     write!(f, "{}", name)?;
                     break;

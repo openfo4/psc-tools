@@ -69,8 +69,8 @@ struct Call<T> {
 struct Cast<T> {
     pub src: T,
     pub dst: T,
-    src_ty: DynType,
-    dst_ty: DynType,
+    src_ty: Type,
+    dst_ty: Type,
 }
 
 #[derive(Clone, Debug)]
@@ -82,8 +82,8 @@ struct Tranlsator<'a> {
     entry: BlockId,
     ast: &'a Ast,
     func: &'a Function,
-    types: HashMap<Value, DynType>,
-    var_types: HashMap<Var, DynType>,
+    types: HashMap<Value, TypeOrPlace>,
+    var_types: HashMap<Var, TypeOrPlace>,
 }
 
 impl<'a> Tranlsator<'a> {
@@ -136,7 +136,7 @@ impl<'a> Tranlsator<'a> {
 
     fn load_place(&mut self, value: Value, skip_last: usize) -> Value {
         match self.types.get(&value) {
-            Some(DynType::Place(segments)) => {
+            Some(TypeOrPlace::Place(segments)) => {
                 let mut value = value;
                 'out: for seg in segments
                     .clone()
@@ -147,7 +147,7 @@ impl<'a> Tranlsator<'a> {
                         PathSegment::Local(local) => value = local,
                         PathSegment::Item(item) => {
                             if let Some(global) = self.ast.globals.iter().find(|v| v.name == item) {
-                                let dst = self.create_value(DynType::from(&global.ty));
+                                let dst = self.create_value(global.ty.clone());
                                 self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
                                 value = dst;
                                 continue;
@@ -155,7 +155,7 @@ impl<'a> Tranlsator<'a> {
 
                             if let Some(prop) = self.ast.properties.iter().find(|v| v.name == item)
                             {
-                                let dst = self.create_value(DynType::from(&prop.ty));
+                                let dst = self.create_value(prop.ty.clone());
                                 self.push_ins(Instruction::GetProperty(
                                     PropertyRef::Local(prop.name.to_owned()),
                                     dst,
@@ -167,7 +167,7 @@ impl<'a> Tranlsator<'a> {
                             for group in &self.ast.property_groups {
                                 if let Some(prop) = group.properties.iter().find(|v| v.name == item)
                                 {
-                                    let dst = self.create_value(DynType::from(&prop.ty));
+                                    let dst = self.create_value(prop.ty.clone());
                                     self.push_ins(Instruction::GetProperty(
                                         PropertyRef::Local(prop.name.to_owned()),
                                         dst,
@@ -191,19 +191,26 @@ impl<'a> Tranlsator<'a> {
 
                 value
             }
-            _ => value,
+            Some(TypeOrPlace::Type(_)) => value,
+            None => unreachable!(),
         }
     }
 
-    fn create_value(&mut self, ty: DynType) -> Value {
+    fn create_value(&mut self, ty: Type) -> Value {
         let value = self.ssa.create_value();
-        self.types.insert(value, ty);
+        self.types.insert(value, TypeOrPlace::Type(ty));
+        value
+    }
+
+    fn create_place(&mut self, place: Vec<PathSegment>) -> Value {
+        let value = self.ssa.create_value();
+        self.types.insert(value, TypeOrPlace::Place(place));
         value
     }
 
     fn load_place_as_func(&mut self, value: Value) -> Callee<Value> {
         match &self.types[&value] {
-            DynType::Place(segments) => {
+            TypeOrPlace::Place(segments) => {
                 let mut segments: &[PathSegment] = &segments;
                 debug_assert_matches!(segments.len(), 1 | 2);
 
@@ -220,7 +227,7 @@ impl<'a> Tranlsator<'a> {
                     },
                     Some(PathSegment::Item(item)) => {
                         if let Some(global) = self.ast.globals.iter().find(|v| &v.name == item) {
-                            let dst = self.create_value(DynType::from(&global.ty));
+                            let dst = self.create_value(global.ty.clone());
                             self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
                             return Callee::Local { object: dst, func };
                         }
@@ -244,9 +251,11 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
     let mut params = Vec::new();
     for param in &func.params {
         let var = translator.get_or_create_var(&param.name);
-        let value = translator.create_value(DynType::from(&param.ty));
+        let value = translator.create_value(param.ty.clone());
         translator.ssa.def_var(var, value);
-        translator.var_types.insert(var, DynType::from(&param.ty));
+        translator
+            .var_types
+            .insert(var, TypeOrPlace::Type(param.ty.clone()));
 
         params.push(Param {
             ty: param.ty.clone(),
@@ -313,7 +322,9 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
             let var = translator.ssa.create_var();
             translator.variables.insert(def.name.clone(), var);
 
-            translator.var_types.insert(var, DynType::from(&def.ty));
+            translator
+                .var_types
+                .insert(var, TypeOrPlace::Type(def.ty.clone()));
 
             if let Some(expr) = &def.value {
                 let value = lower_expr(translator, expr);
@@ -415,12 +426,12 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
     match expr {
         Expr::Literal(literal) => {
             let ty = match literal {
-                Literal::NumberInt(_) => DynType::Int,
+                Literal::NumberInt(_) => Type::Int,
                 Literal::NumberDecimal {
                     integer: _,
                     fraction: _,
-                } => DynType::Float,
-                Literal::String(_) => DynType::String,
+                } => Type::Float,
+                Literal::String(_) => Type::String,
             };
 
             let value = translator.create_value(ty);
@@ -439,7 +450,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             let value = translator.ssa.create_value();
             translator.types.insert(
                 value,
-                DynType::Place(vec![PathSegment::Item(ident.to_owned())]),
+                TypeOrPlace::Place(vec![PathSegment::Item(ident.to_owned())]),
             );
             value
         }
@@ -461,42 +472,42 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         Expr::CmpEq { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.create_value(DynType::Bool);
+            let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::CmpEq(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpNe { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.create_value(DynType::Bool);
+            let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::CmpNe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpLt { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.create_value(DynType::Bool);
+            let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::CmpLt(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpLe { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.create_value(DynType::Bool);
+            let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::CmpLe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpGt { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.create_value(DynType::Bool);
+            let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::CmpGt(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpGe { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.create_value(DynType::Bool);
+            let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::CmpGe(Binop { lhs, rhs, dst }));
             dst
         }
@@ -520,17 +531,17 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             let lhs = lower_expr(translator, lhs);
             let rhs = lower_expr(translator, rhs);
 
-            let DynType::Place(rhs) = &translator.types[&rhs] else {
+            let TypeOrPlace::Place(rhs) = &translator.types[&rhs] else {
                 unreachable!();
             };
 
             let mut segments = match &translator.types[&lhs] {
-                DynType::Place(segments) => segments.clone(),
-                _ => vec![PathSegment::Local(lhs)],
+                TypeOrPlace::Place(segments) => segments.clone(),
+                TypeOrPlace::Type(_) => vec![PathSegment::Local(lhs)],
             };
 
             segments.extend(rhs.clone());
-            translator.create_value(DynType::Place(segments))
+            translator.create_place(segments)
         }
         Expr::Index { array, index } => {
             let lhs = lower_expr(translator, array);
@@ -542,39 +553,42 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         Expr::Assign { src, dst } => {
             let src = load_place_expr(translator, src);
             store_place(translator, src, dst);
-            translator.create_value(DynType::None)
+            translator.create_value(Type::None)
         }
         Expr::AddAssign { src, dst } => {
             let res = lower_arithmetic_binop(translator, ArithmeticBinop::Add, dst, src);
             store_place(translator, res, dst);
-            translator.create_value(DynType::None)
+            translator.create_value(Type::None)
         }
         Expr::SubAssign { src, dst } => {
             let res = lower_arithmetic_binop(translator, ArithmeticBinop::Sub, dst, src);
             store_place(translator, res, dst);
-            translator.create_value(DynType::None)
+            translator.create_value(Type::None)
         }
         Expr::MulAssign { src, dst } => {
             let res = lower_arithmetic_binop(translator, ArithmeticBinop::Mul, dst, src);
             store_place(translator, res, dst);
-            translator.create_value(DynType::None)
+            translator.create_value(Type::None)
         }
         Expr::DivAssign { src, dst } => {
             let res = lower_arithmetic_binop(translator, ArithmeticBinop::Div, dst, src);
             store_place(translator, res, dst);
-            translator.create_value(DynType::None)
+            translator.create_value(Type::None)
         }
         Expr::RemAssign { src, dst } => {
             let res = lower_arithmetic_binop(translator, ArithmeticBinop::Rem, dst, src);
             store_place(translator, res, dst);
-            translator.create_value(DynType::None)
+            translator.create_value(Type::None)
         }
         x => todo!("{:?}", expr),
     }
 }
 
-fn convert_to(translator: &mut Tranlsator, src: Value, want: DynType) -> Value {
-    let is = &translator.types[&src];
+fn convert_to(translator: &mut Tranlsator, src: Value, want: Type) -> Value {
+    let TypeOrPlace::Type(is) = &translator.types[&src] else {
+        unreachable!();
+    };
+
     if *is == want {
         return src;
     }
@@ -602,7 +616,7 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
     let place = lower_expr(translator, dst);
 
     match &translator.types[&place] {
-        DynType::Place(segments) => {
+        TypeOrPlace::Place(segments) => {
             let segments = segments.clone();
 
             let mut place = place;
@@ -613,7 +627,7 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                         if let Some(global) =
                             translator.ast.globals.iter().find(|v| &v.name == item)
                         {
-                            let dst = translator.create_value(DynType::from(&global.ty));
+                            let dst = translator.create_value(global.ty.clone());
                             translator.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
                             place = dst;
                             continue;
@@ -628,7 +642,7 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                 }
                 PathSegment::Item(item) => {
                     if let Some(global) = translator.ast.globals.iter().find(|v| &v.name == item) {
-                        let value = convert_to(translator, value, DynType::from(&global.ty));
+                        let value = convert_to(translator, value, global.ty.clone());
                         translator.push_ins(Instruction::StoreGlobal(global.name.clone(), value));
                         return;
                     }
@@ -637,13 +651,15 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
 
             return;
         }
-        _ => {}
+        TypeOrPlace::Type(_) => {}
     }
 
     // The place is a local on-stack variable.
     if let Expr::Ident { ident } = dst {
         let var = translator.variables[ident];
-        let want_ty = &translator.var_types[&var];
+        let TypeOrPlace::Type(want_ty) = &translator.var_types[&var] else {
+            unreachable!();
+        };
         let value = convert_to(translator, value, want_ty.clone());
         translator.ssa.def_var(var, value);
         return;
@@ -661,24 +677,28 @@ fn lower_arithmetic_binop(
     let lhs = load_place_expr(translator, lhs);
     let rhs = load_place_expr(translator, rhs);
 
-    let lhs_ty = &translator.types[&lhs];
-    let rhs_ty = &translator.types[&rhs];
+    let TypeOrPlace::Type(lhs_ty) = &translator.types[&lhs] else {
+        unreachable!();
+    };
+    let TypeOrPlace::Type(rhs_ty) = &translator.types[&rhs] else {
+        unreachable!();
+    };
 
     // Only the add operator is allows for strings.
     if op == ArithmeticBinop::Add {
-        if *lhs_ty == DynType::String || *rhs_ty == DynType::String {
-            let lhs = convert_to(translator, lhs, DynType::String);
-            let rhs = convert_to(translator, rhs, DynType::String);
-            let dst = translator.create_value(DynType::String);
+        if *lhs_ty == Type::String || *rhs_ty == Type::String {
+            let lhs = convert_to(translator, lhs, Type::String);
+            let rhs = convert_to(translator, rhs, Type::String);
+            let dst = translator.create_value(Type::String);
             translator.push_ins(Instruction::StringConcat(Binop { lhs, rhs, dst }));
             return dst;
         }
     }
 
-    if *lhs_ty == DynType::Float || *rhs_ty == DynType::Float {
-        let lhs = convert_to(translator, lhs, DynType::Float);
-        let rhs = convert_to(translator, rhs, DynType::Float);
-        let dst = translator.create_value(DynType::Float);
+    if *lhs_ty == Type::Float || *rhs_ty == Type::Float {
+        let lhs = convert_to(translator, lhs, Type::Float);
+        let rhs = convert_to(translator, rhs, Type::Float);
+        let dst = translator.create_value(Type::Float);
 
         let ins = match op {
             ArithmeticBinop::Add => Instruction::FAdd(Binop { lhs, rhs, dst }),
@@ -692,7 +712,7 @@ fn lower_arithmetic_binop(
         return dst;
     }
 
-    let dst = translator.create_value(DynType::Int);
+    let dst = translator.create_value(Type::Int);
     let ins = match op {
         ArithmeticBinop::Add => Instruction::IAdd(Binop { lhs, rhs, dst }),
         ArithmeticBinop::Sub => Instruction::ISub(Binop { lhs, rhs, dst }),
@@ -728,25 +748,10 @@ struct Param<T> {
     value: T,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum DynType {
-    None,
-    Bool,
-    Int,
-    Float,
-    String,
+#[derive(Clone, Debug)]
+enum TypeOrPlace {
+    Type(Type),
     Place(Vec<PathSegment>),
-}
-
-impl From<&Type> for DynType {
-    fn from(value: &Type) -> Self {
-        match value {
-            Type::Ty(ty) if ty.eq_ignore_ascii_case("int") => Self::Int,
-            Type::Ty(ty) if ty.eq_ignore_ascii_case("float") => Self::Float,
-            Type::Ty(ty) if ty.eq_ignore_ascii_case("string") => Self::String,
-            _ => todo!(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

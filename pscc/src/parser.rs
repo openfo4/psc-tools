@@ -308,7 +308,7 @@ impl<'a> Parser<'a> {
 
     fn parse_type(&mut self) -> Result<Type, Error<'a>> {
         let ty = self.consume_ident()?;
-        let mut ty = Type::Ty(ty.to_owned());
+        let mut ty = Type::new(ty);
 
         if self
             .peek()
