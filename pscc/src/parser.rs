@@ -835,6 +835,44 @@ impl FromStr for Keyword {
     }
 }
 
+impl Display for Keyword {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ScriptName => f.write_str("ScriptName"),
+            Self::Extends => f.write_str("extends"),
+            Self::Default => f.write_str("Default"),
+            Self::Conditional => f.write_str("Conditional"),
+            Self::Mandatory => f.write_str("Mandatory"),
+            Self::Hidden => f.write_str("Hidden"),
+            Self::Optional => f.write_str("Optional"),
+            Self::State => f.write_str("State"),
+            Self::EndState => f.write_str("EndState"),
+            Self::Group => f.write_str("Group"),
+            Self::EndGroup => f.write_str("EndGroup"),
+            Self::Property => f.write_str("Property"),
+            Self::Auto => f.write_str("auto"),
+            Self::Const => f.write_str("const"),
+            Self::Function => f.write_str("function"),
+            Self::EndFunction => f.write_str("endFunction"),
+            Self::Event => f.write_str("Event"),
+            Self::EndEvent => f.write_str("EndEvent"),
+            Self::If => f.write_str("if"),
+            Self::Else => f.write_str("else"),
+            Self::ElseIf => f.write_str("elseif"),
+            Self::EndIf => f.write_str("endif"),
+            Self::While => f.write_str("while"),
+            Self::EndWhile => f.write_str("endwhile"),
+            Self::Return => f.write_str("return"),
+            Self::New => f.write_str("new"),
+            Self::Struct => f.write_str("Struct"),
+            Self::EndStruct => f.write_str("EndStruct"),
+            Self::Global => f.write_str("global"),
+            Self::Native => f.write_str("native"),
+            Self::DebugOnly => f.write_str("DebugOnly"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum ParseToken<'a> {
     Token(&'a TokenKind<'a>),
