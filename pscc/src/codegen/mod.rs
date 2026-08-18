@@ -117,10 +117,14 @@ impl<'a> Tranlsator<'a> {
     }
 
     pub fn push_ins(&mut self, ins: Instruction<Value>) {
-        self.blocks
-            .entry(self.cur_block.unwrap())
-            .or_default()
-            .push(ins);
+        // If this is `None` we are in unreachable code.
+        // This usually happens after more code exists after
+        // a return.
+        // Ignoring unrechable code here already is easy and
+        // reduces pressure on all later passes.
+        if let Some(block) = self.cur_block {
+            self.blocks.entry(block).or_default().push(ins);
+        }
     }
 
     pub fn create_block(&mut self) -> BlockId {
@@ -418,6 +422,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
                 None => translator.ssa.create_value(),
             };
             translator.push_ins(Instruction::Return(value));
+            translator.cur_block = None;
         }
     }
 }
