@@ -55,7 +55,7 @@ impl<T> ControlFlowGraph<T> {
 
 impl<T> Display for ControlFlowGraph<T>
 where
-    T: Display,
+    T: Display + std::fmt::Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut queue: VecDeque<_> = vec![self.entry].into();
@@ -183,6 +183,9 @@ where
                             .join(" ");
 
                         match &op.callee {
+                            Callee::LocalSelf { func } => {
+                                writeln!(f, "{} = call self {} {}", op.returns, func, args)?;
+                            }
                             Callee::Local { object, func } => {
                                 writeln!(f, "{} = call {} {} {}", op.returns, object, func, args)?;
                             }
@@ -210,6 +213,9 @@ where
                     }
                     Instruction::StringConcat(op) => {
                         writeln!(f, "{} = string_concat {} {}", op.dst, op.lhs, op.rhs)?;
+                    }
+                    Instruction::GetProperty(prop, dst) => {
+                        writeln!(f, "{} = get_property {:?}", dst, prop)?;
                     }
                 }
             }
@@ -308,6 +314,9 @@ impl DataFlowGraph {
                     Instruction::Cast(op) => {
                         uses.entry(op.src).or_default().push(loc);
                         defs.insert(op.dst, loc);
+                    }
+                    Instruction::GetProperty(_, dst) => {
+                        defs.insert(*dst, loc);
                     }
                 }
             }

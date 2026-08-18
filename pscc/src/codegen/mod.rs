@@ -4,6 +4,7 @@ mod reg;
 mod ssa;
 
 use std::collections::HashMap;
+use std::debug_assert_matches;
 
 use crate::ast::{Ast, Expr, Function, Statement, Type};
 use crate::codegen::func::{Block, ControlFlowGraph};
@@ -41,6 +42,7 @@ pub enum Instruction<T> {
     StoreGlobal(String, T),
     Cast(Cast<T>),
     StringConcat(Binop<T>),
+    GetProperty(PropertyRef<T>, T),
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +138,7 @@ impl<'a> Tranlsator<'a> {
         match self.types.get(&value) {
             Some(DynType::Place(segments)) => {
                 let mut value = value;
-                for seg in segments
+                'out: for seg in segments
                     .clone()
                     .into_iter()
                     .take(segments.len().saturating_sub(skip_last))
@@ -149,6 +151,30 @@ impl<'a> Tranlsator<'a> {
                                 self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
                                 value = dst;
                                 continue;
+                            }
+
+                            if let Some(prop) = self.ast.properties.iter().find(|v| v.name == item)
+                            {
+                                let dst = self.create_value(DynType::from(&prop.ty));
+                                self.push_ins(Instruction::GetProperty(
+                                    PropertyRef::Local(prop.name.to_owned()),
+                                    dst,
+                                ));
+                                value = dst;
+                                continue;
+                            };
+
+                            for group in &self.ast.property_groups {
+                                if let Some(prop) = group.properties.iter().find(|v| v.name == item)
+                                {
+                                    let dst = self.create_value(DynType::from(&prop.ty));
+                                    self.push_ins(Instruction::GetProperty(
+                                        PropertyRef::Local(prop.name.to_owned()),
+                                        dst,
+                                    ));
+                                    value = dst;
+                                    continue 'out;
+                                };
                             }
 
                             if let Some(func) = self.ast.functions.iter().find(|v| v.name == item) {
@@ -179,7 +205,7 @@ impl<'a> Tranlsator<'a> {
         match &self.types[&value] {
             DynType::Place(segments) => {
                 let mut segments: &[PathSegment] = &segments;
-                debug_assert_eq!(segments.len(), 2);
+                debug_assert_matches!(segments.len(), 1 | 2);
 
                 // The function name is the last segment.
                 let PathSegment::Item(func) = segments.split_off_last().unwrap() else {
@@ -187,12 +213,12 @@ impl<'a> Tranlsator<'a> {
                 };
 
                 let func = func.to_owned();
-                match &segments[0] {
-                    PathSegment::Local(local) => Callee::Local {
+                match segments.get(0) {
+                    Some(PathSegment::Local(local)) => Callee::Local {
                         object: *local,
                         func,
                     },
-                    PathSegment::Item(item) => {
+                    Some(PathSegment::Item(item)) => {
                         if let Some(global) = self.ast.globals.iter().find(|v| &v.name == item) {
                             let dst = self.create_value(DynType::from(&global.ty));
                             self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
@@ -204,6 +230,7 @@ impl<'a> Tranlsator<'a> {
                             func,
                         }
                     }
+                    None => Callee::LocalSelf { func },
                 }
             }
             _ => todo!(),
@@ -701,7 +728,7 @@ struct Param<T> {
     value: T,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum DynType {
     None,
     Bool,
@@ -730,6 +757,13 @@ enum PathSegment {
 
 #[derive(Clone, Debug)]
 enum Callee<T> {
+    LocalSelf { func: String },
     Local { object: T, func: String },
     Static { class: String, func: String },
+}
+
+#[derive(Clone, Debug)]
+enum PropertyRef<T> {
+    Local(String),
+    Other(T, String),
 }

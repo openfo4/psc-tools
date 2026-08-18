@@ -143,7 +143,7 @@ impl<'a> Parser<'a> {
         Ok(Ast {
             script_name: header.script_name,
             extends: header.extends,
-            property_groups: Vec::new(),
+            property_groups,
             functions,
             properties,
             globals,

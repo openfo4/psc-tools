@@ -85,6 +85,7 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                                 func,
                             },
                             Callee::Static { class, func } => Callee::Static { class, func },
+                            Callee::LocalSelf { func } => Callee::LocalSelf { func },
                         },
                         args,
                         returns: regs.alloc(op.returns),

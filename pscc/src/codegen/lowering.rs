@@ -2,10 +2,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::BlockId;
-use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction};
+use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction, PropertyRef};
 use crate::lexer::Literal;
 
-use pex::{CallMethod, CallStatic, ConditionalBranch, Instruction as PexInstruction, Unop, Value};
+use pex::{
+    CallMethod, CallStatic, ConditionalBranch, Instruction as PexInstruction, PropertyGet, Unop,
+    Value,
+};
 
 pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
     let mut params = Vec::new();
@@ -159,8 +162,28 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                                 return_assignment,
                             })
                         }
+                        Callee::LocalSelf { func } => pex::Instruction::CallMethod(CallMethod {
+                            function_name: func.clone(),
+                            object: Value::Ident("self".to_owned()),
+                            return_assignment,
+                            args,
+                        }),
                     }
                 }
+                Instruction::GetProperty(prop, dst) => match prop {
+                    PropertyRef::Local(name) => pex::Instruction::PropertyGet(PropertyGet {
+                        property: name.clone(),
+                        value: Value::Ident("self".to_owned()),
+                        return_assignment: Value::Ident(dst.to_string()),
+                    }),
+                    PropertyRef::Other(object, name) => {
+                        pex::Instruction::PropertyGet(PropertyGet {
+                            property: name.clone(),
+                            value: Value::Ident(object.to_string()),
+                            return_assignment: Value::Ident(dst.to_string()),
+                        })
+                    }
+                },
                 _ => continue,
             };
             instructions.push(out);
