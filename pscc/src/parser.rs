@@ -494,112 +494,39 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Return(expr))
             }
             _ => {
-                // There are three forms of statements:
-                // 1. <Type> <Ident> [ = <Expr> ]
-                // 2. <LValueExpr> <AssignOp> <Expr>
-                // 3. <Expr> (typically in the form of a single function call)
-
-                match self.tokens.first().map(|token| &token.kind) {
-                    // Form 1, 2 or 3.
-                    Some(TokenKind::Ident(ident)) => {
-                        // '[]' indicates an array type, only valid in form 1.
-                        if matches!(
-                            self.tokens.get(1).map(|token| &token.kind),
-                            Some(TokenKind::OpenBracket)
-                        ) && matches!(
-                            self.tokens.get(2).map(|token| &token.kind),
-                            Some(TokenKind::CloseBracket)
-                        ) {
-                            let ty = self.parse_type()?;
-                            let ident = self.consume_ident()?;
-                            let value = match self.consume_next(&[
-                                ParseToken::Token(&TokenKind::Eq),
-                                ParseToken::Token(&TokenKind::Eol),
-                            ])? {
-                                ParseToken::Token(TokenKind::Eq) => {
-                                    let expr = self.parse_expr()?;
-                                    Some(expr)
-                                }
-                                ParseToken::Token(TokenKind::Eol) => None,
-                                _ => unreachable!(),
-                            };
-
-                            return Ok(Statement::Define(Define {
-                                ty,
-                                name: ident.to_owned(),
-                                value,
-                            }));
+                // A statement of the form <Type> <Ident> <Eol> or <Type> <Ident> <Eq> ..
+                // is a definition.
+                if let Some(tokens) = self.peek_after_type_all()
+                    && tokens
+                        .get(0)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Ident(_)))
+                    && tokens
+                        .get(1)
+                        .is_some_and(|token| matches!(token.kind, TokenKind::Eol | TokenKind::Eq))
+                {
+                    let ty = self.parse_type()?;
+                    let ident = self.consume_ident()?;
+                    let value = match self.consume_next(&[
+                        ParseToken::Token(&TokenKind::Eq),
+                        ParseToken::Token(&TokenKind::Eol),
+                    ])? {
+                        ParseToken::Token(TokenKind::Eq) => {
+                            let expr = self.parse_expr()?;
+                            Some(expr)
                         }
+                        ParseToken::Token(TokenKind::Eol) => None,
+                        _ => unreachable!(),
+                    };
 
-                        let expr = self.parse_expr()?;
-                        return Ok(Statement::Expr(expr));
-
-                        // // Form 2
-                        // match self.tokens.get(1).map(|token| &token.kind) {
-                        //     Some(TokenKind::Eq) => {
-                        //         self.consume();
-                        //         let expr = self.parse_expr()?;
-                        //         return Statement::Assign(Assign { src: (), dst: () });
-                        //     }
-                        //     Some(TokenKind::PlusEq) => {
-                        //         self.consume();
-                        //     }
-                        //     Some(TokenKind::MinusEq) => {
-                        //         self.consume();
-                        //     }
-                        //     Some(TokenKind::StarEq) => {
-                        //         self.consume();
-                        //     }
-                        //     Some(TokenKind::SlashEq) => {
-                        //         self.consume();
-                        //     }
-                        //     Some(TokenKind::PercentEq) => {
-                        //         self.consume();
-                        //     }
-                        //     _ => {}
-                        // }
-                    }
-                    // Always form 3.
-                    _ => {
-                        let expr = self.parse_expr()?;
-                        Ok(Statement::Expr(expr))
-                    }
+                    return Ok(Statement::Define(Define {
+                        ty,
+                        name: ident.to_owned(),
+                        value,
+                    }));
                 }
 
-                // let ty = self.parse_type()?;
-
-                // let mut name = String::new();
-                // if self.peek().is_some_and(|token| {
-                //     matches!(
-                //         token.kind,
-                //         TokenKind::Eq
-                //             | TokenKind::PlusEq
-                //             | TokenKind::MinusEq
-                //             | TokenKind::StarEq
-                //             | TokenKind::SlashEq
-                //             | TokenKind::PercentEq
-                //     )
-                // }) {
-                //     match &ty {
-                //         Type::Ty(ty) => name = ty.clone(),
-                //         Type::Array(_) => todo!(),
-                //     }
-                // }
-
-                // if self
-                //     .peek()
-                //     .is_some_and(|token| token.kind == TokenKind::Eol)
-                // {}
-
-                // // match self.consume().map(|token| token.kind) {
-                // //     Some(TokenKind::Eol) => Ok(Statement::Define {
-                // //         ty,
-                // //         name: name,
-                // //         value: None,
-                // //     }),
-                // //     Some(TokenKind::Eq) => Ok(Statement::Assign(Assign { src })),
-                // //     _ => todo!(),
-                // // }
+                let expr = self.parse_expr()?;
+                Ok(Statement::Expr(expr))
             }
         }
     }
@@ -713,6 +640,29 @@ impl<'a> Parser<'a> {
         }
 
         tokens.first()
+    }
+
+    /// Returns the next token after a complete type.
+    fn peek_after_type_all(&self) -> Option<&[Token<'a>]> {
+        let (name, mut tokens) = self.tokens.split_first()?;
+        if !matches!(name.kind, TokenKind::Ident(_)) {
+            return None;
+        }
+
+        while matches!(
+            tokens.first().map(|token| &token.kind),
+            Some(TokenKind::OpenBracket)
+        ) {
+            let open_bracket = tokens.split_off_first()?;
+            let close_bracket = tokens.split_off_first()?;
+            if open_bracket.kind != TokenKind::OpenBracket
+                || close_bracket.kind != TokenKind::CloseBracket
+            {
+                return None;
+            }
+        }
+
+        Some(tokens)
     }
 
     fn consume(&mut self) -> Option<&'a Token<'a>> {
@@ -893,4 +843,59 @@ enum ExprOrType {
 struct Header {
     script_name: String,
     extends: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Define, Expr, Statement, Type};
+    use crate::lexer::{Token, TokenKind};
+    use crate::parser::Parser;
+
+    fn token(kind: TokenKind) -> Token {
+        Token { span: 0..0, kind }
+    }
+
+    #[test]
+    fn parse_statement_define() {
+        let tokens = [
+            token(TokenKind::Ident("int")),
+            token(TokenKind::Ident("x")),
+            token(TokenKind::Eol),
+        ];
+        let mut parser = Parser::new(&tokens);
+
+        let stmt = parser.parse_statement().unwrap();
+        assert_eq!(
+            stmt,
+            Statement::Define(Define {
+                ty: Type::Ty("int".to_owned()),
+                name: "x".to_owned(),
+                value: None
+            })
+        );
+    }
+
+    #[test]
+    fn parse_statement_define_with_assign() {
+        let tokens = [
+            token(TokenKind::Ident("int")),
+            token(TokenKind::Ident("x")),
+            token(TokenKind::Eq),
+            token(TokenKind::Ident("y")),
+            token(TokenKind::Eol),
+        ];
+        let mut parser = Parser::new(&tokens);
+
+        let stmt = parser.parse_statement().unwrap();
+        assert_eq!(
+            stmt,
+            Statement::Define(Define {
+                ty: Type::Ty("int".to_owned()),
+                name: "x".to_owned(),
+                value: Some(Expr::Ident {
+                    ident: "y".to_owned()
+                })
+            })
+        );
+    }
 }
