@@ -191,6 +191,7 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
         let var = translator.get_or_create_var(&param.name);
         let value = translator.create_value(DynType::from(&param.ty));
         translator.ssa.def_var(var, value);
+        translator.var_types.insert(var, DynType::from(&param.ty));
 
         params.push(Param {
             ty: param.ty.clone(),
@@ -272,20 +273,22 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
             else_block,
         } => {
             let merge_block = translator.create_block();
-            let then_block = translator.create_block();
 
+            let next_block = translator.create_block();
             for block in then_blocks {
+                let then_block = translator.create_block();
+
                 let condition = lower_expr(translator, &block.condition);
                 translator.push_ins(Instruction::Brif(
                     condition,
                     then_block,
                     Vec::new(),
-                    merge_block,
+                    next_block,
                     Vec::new(),
                 ));
-                translator.ssa.branch(&[then_block, merge_block]);
-                translator.ssa.seal(then_block);
+                translator.ssa.branch(&[then_block, next_block]);
 
+                translator.ssa.seal(then_block);
                 translator.switch_to_block(then_block);
                 for stmt in &block.statements {
                     lower_stmt(translator, stmt);
@@ -293,7 +296,17 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
 
                 translator.push_ins(Instruction::Jmp(merge_block, Vec::new()));
                 translator.ssa.branch(&[merge_block]);
+
+                translator.switch_to_block(next_block);
+                translator.ssa.seal(next_block);
             }
+
+            for stmt in else_block {
+                lower_stmt(translator, stmt);
+            }
+
+            translator.push_ins(Instruction::Jmp(merge_block, Vec::new()));
+            translator.ssa.branch(&[merge_block]);
 
             translator.ssa.seal(merge_block);
             translator.switch_to_block(merge_block);
