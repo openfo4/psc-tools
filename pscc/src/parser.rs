@@ -415,6 +415,21 @@ impl<'a> Parser<'a> {
 
         self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
 
+        // Native functions have no function body and no EndFunction/EndEvent
+        // keyword.
+        if is_native {
+            return Ok(Function {
+                script,
+                name,
+                params,
+                statements: Vec::new(),
+                return_ty,
+                is_global,
+                is_native,
+                is_debug_only,
+            });
+        }
+
         let mut statements = Vec::new();
         while self.peek().is_some_and(|token| {
             !matches!(
