@@ -167,10 +167,12 @@ impl<'a> Parser<'a> {
                 ParseToken::Keyword(Keyword::Const),
                 ParseToken::Keyword(Keyword::Default),
                 ParseToken::Keyword(Keyword::Conditional),
+                ParseToken::Keyword(Keyword::Hidden),
             ])? {
                 ParseToken::Keyword(Keyword::Const) => {}
                 ParseToken::Keyword(Keyword::Default) => {}
                 ParseToken::Keyword(Keyword::Conditional) => {}
+                ParseToken::Keyword(Keyword::Hidden) => {}
                 _ => unreachable!(),
             }
         }
@@ -261,6 +263,7 @@ impl<'a> Parser<'a> {
                 ParseToken::Keyword(Keyword::Mandatory),
                 ParseToken::Keyword(Keyword::Hidden),
                 ParseToken::Keyword(Keyword::Conditional),
+                ParseToken::Keyword(Keyword::AutoReadOnly),
             ])? {
                 ParseToken::Keyword(Keyword::Auto) => {
                     is_auto = true;
@@ -271,6 +274,7 @@ impl<'a> Parser<'a> {
                 ParseToken::Keyword(Keyword::Mandatory) => {}
                 ParseToken::Keyword(Keyword::Hidden) => {}
                 ParseToken::Keyword(Keyword::Conditional) => {}
+                ParseToken::Keyword(Keyword::AutoReadOnly) => {}
                 _ => unreachable!(),
             }
         }
@@ -383,7 +387,7 @@ impl<'a> Parser<'a> {
             // Default parameter value.
             if self.peek().is_some_and(|tok| tok.kind == TokenKind::Eq) {
                 self.consume();
-                value = Some(self.parse_ident_or_literal()?);
+                value = Some(self.parse_expr()?);
             }
 
             params.push(Define { ty, name, value });
@@ -792,6 +796,7 @@ enum Keyword {
     Global,
     Native,
     DebugOnly,
+    AutoReadOnly,
 }
 
 impl FromStr for Keyword {
@@ -804,7 +809,7 @@ impl FromStr for Keyword {
             s if s.eq_ignore_ascii_case("Default") => Ok(Self::Default),
             s if s.eq_ignore_ascii_case("Conditional") => Ok(Self::Conditional),
             s if s.eq_ignore_ascii_case("Mandatory") => Ok(Self::Mandatory),
-            s if s.eq_ignore_ascii_case("Hidden") => Ok(Self::Mandatory),
+            s if s.eq_ignore_ascii_case("Hidden") => Ok(Self::Hidden),
             s if s.eq_ignore_ascii_case("Optional") => Ok(Self::Optional),
             s if s.eq_ignore_ascii_case("State") => Ok(Self::State),
             s if s.eq_ignore_ascii_case("EndState") => Ok(Self::EndState),
@@ -830,6 +835,7 @@ impl FromStr for Keyword {
             s if s.eq_ignore_ascii_case("Global") => Ok(Self::Global),
             s if s.eq_ignore_ascii_case("Native") => Ok(Self::Native),
             s if s.eq_ignore_ascii_case("DebugOnly") => Ok(Self::DebugOnly),
+            s if s.eq_ignore_ascii_case("AutoReadOnly") => Ok(Self::AutoReadOnly),
             _ => Err(()),
         }
     }
@@ -869,6 +875,7 @@ impl Display for Keyword {
             Self::Global => f.write_str("global"),
             Self::Native => f.write_str("native"),
             Self::DebugOnly => f.write_str("DebugOnly"),
+            Self::AutoReadOnly => f.write_str("AutoReadOnly"),
         }
     }
 }
@@ -929,7 +936,7 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Define(Define {
-                ty: Type::Ty("int".to_owned()),
+                ty: Type::Int,
                 name: "x".to_owned(),
                 value: None
             })
@@ -951,7 +958,7 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Define(Define {
-                ty: Type::Ty("int".to_owned()),
+                ty: Type::Int,
                 name: "x".to_owned(),
                 value: Some(Expr::Ident {
                     ident: "y".to_owned()
