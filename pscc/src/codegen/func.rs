@@ -185,7 +185,18 @@ where
                             .collect::<Vec<_>>()
                             .join(" ");
 
-                        writeln!(f, "{} = call {} {}", op.returns, op.callee, args)?;
+                        match &op.receiver {
+                            Some(receiver) => {
+                                writeln!(
+                                    f,
+                                    "{} = call {} {} {}",
+                                    op.returns, receiver, op.callee, args
+                                )?;
+                            }
+                            None => {
+                                writeln!(f, "{} = call {} {}", op.returns, op.callee, args)?;
+                            }
+                        }
                     }
                     Instruction::Store(op) => {
                         writeln!(f, "{} = {}", op.dst, op.src)?;

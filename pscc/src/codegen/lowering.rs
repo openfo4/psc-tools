@@ -5,7 +5,7 @@ use crate::codegen::ssa::BlockId;
 use crate::codegen::{Binop, ControlFlowGraph, FuncInfo, Instruction};
 use crate::lexer::Literal;
 
-use pex::{ConditionalBranch, Instruction as PexInstruction, Unop, Value};
+use pex::{CallMethod, ConditionalBranch, Instruction as PexInstruction, Unop, Value};
 
 pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
     let mut params = Vec::new();
@@ -134,6 +134,25 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                     src: Value::Ident(src.to_string()),
                     dst: Value::Ident(global.clone()),
                 }),
+                Instruction::Call(op) => {
+                    let args = op
+                        .args
+                        .iter()
+                        .map(|arg| Value::Ident(arg.to_string()))
+                        .collect();
+                    let return_assignment = Value::Ident(op.returns.to_string());
+
+                    match op.receiver {
+                        Some(receiver) => pex::Instruction::CallMethod(CallMethod {
+                            function_name: op.callee.clone(),
+                            object: Value::Ident(receiver.to_string()),
+                            args,
+                            return_assignment,
+                        }),
+                        None => todo!(),
+                    }
+                }
+
                 _ => continue,
             };
             instructions.push(out);

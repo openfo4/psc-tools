@@ -60,6 +60,8 @@ pub struct Binop<T> {
 #[derive(Clone, Debug)]
 struct Call<T> {
     callee: String,
+    /// The receiver object if the call is non-static.
+    receiver: Option<T>,
     args: Vec<T>,
     returns: T,
 }
@@ -135,11 +137,22 @@ impl<'a> Tranlsator<'a> {
 
     fn load_place(&mut self, value: Value) -> Value {
         match self.types.get(&value) {
-            Some(DynType::PlaceGlobal(global)) => {
-                let global = self.ast.globals.iter().find(|v| &v.name == global).unwrap();
+            Some(DynType::Place(segments)) => {
+                let mut value = value;
+                for seg in segments.clone() {
+                    match seg {
+                        PathSegment::Local(local) => value = local,
+                        PathSegment::Item(item) => {
+                            if let Some(global) = self.ast.globals.iter().find(|v| v.name == item) {
+                                let dst = self.create_value(DynType::from(&global.ty));
+                                self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
+                                value = dst;
+                                continue;
+                            }
+                        }
+                    }
+                }
 
-                let value = self.create_value(DynType::from(&global.ty));
-                self.push_ins(Instruction::LoadGlobal(global.name.clone(), value));
                 value
             }
             _ => value,
@@ -150,6 +163,23 @@ impl<'a> Tranlsator<'a> {
         let value = self.ssa.create_value();
         self.types.insert(value, ty);
         value
+    }
+
+    fn load_place_as_func(&mut self, value: Value) -> (String, Option<Value>) {
+        match &self.types[&value] {
+            DynType::Place(segments) => {
+                let mut segments: &[PathSegment] = &segments;
+
+                // The function name is the last segment.
+                let PathSegment::Item(func) = segments.split_off_last().unwrap() else {
+                    unreachable!();
+                };
+                let func = func.to_owned();
+                let object = self.load_place(value);
+                (func, Some(object))
+            }
+            _ => todo!(),
+        }
     }
 }
 
@@ -336,30 +366,13 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 return value;
             }
 
-            // Identifier is the name of a global variable, property or function
-            // of the current class or a parent class.
-            if let Some(global) = translator.ast.globals.iter().find(|v| v.name == *ident) {
-                let value = translator.ssa.create_value();
-                translator
-                    .types
-                    .insert(value, DynType::PlaceGlobal(global.name.clone()));
-                return value;
-            }
-
-            if let Some(func) = translator.ast.functions.iter().find(|v| v.name == *ident) {
-                let value = translator.ssa.create_value();
-                translator
-                    .types
-                    .insert(value, DynType::Func(func.name.clone()));
-                return value;
-            }
-
             // Otherwise the identifier is a plain type/value name that needs to
             // be reconstructed into a value by a deref operation.
             let value = translator.ssa.create_value();
-            translator
-                .types
-                .insert(value, DynType::Path(ident.to_owned()));
+            translator.types.insert(
+                value,
+                DynType::Place(vec![PathSegment::Item(ident.to_owned())]),
+            );
             value
         }
         Expr::Add { lhs, rhs } => {
@@ -421,12 +434,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         }
         Expr::Call { callee, args } => {
             let callee = lower_expr(translator, callee);
-            let callee = translator
-                .types
-                .get(&callee)
-                .unwrap()
-                .unwrap_func()
-                .to_owned();
+            let (callee, receiver) = translator.load_place_as_func(callee);
 
             let args: Vec<_> = args
                 .iter()
@@ -434,20 +442,28 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 .collect();
             let dst = translator.ssa.create_value();
             translator.push_ins(Instruction::Call(Call {
-                callee: callee.clone(),
+                callee,
                 args,
                 returns: dst,
+                receiver,
             }));
             dst
         }
         Expr::Deref { lhs, rhs } => {
             let lhs = lower_expr(translator, lhs);
             let rhs = lower_expr(translator, rhs);
-            let lhs = translator.types[&lhs].unwrap_path();
-            let rhs = translator.types[&rhs].unwrap_path();
-            dbg!(&lhs, &rhs);
 
-            todo!();
+            let DynType::Place(rhs) = &translator.types[&rhs] else {
+                unreachable!();
+            };
+
+            let mut segments = match &translator.types[&lhs] {
+                DynType::Place(segments) => segments.clone(),
+                _ => vec![PathSegment::Local(lhs)],
+            };
+
+            segments.extend(rhs.clone());
+            translator.create_value(DynType::Place(segments))
         }
         Expr::Index { array, index } => {
             let lhs = lower_expr(translator, array);
@@ -519,15 +535,39 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
     let place = lower_expr(translator, dst);
 
     match &translator.types[&place] {
-        DynType::PlaceGlobal(global) => {
-            let global = translator
-                .ast
-                .globals
-                .iter()
-                .find(|v| &v.name == global)
-                .unwrap();
-            let value = convert_to(translator, value, DynType::from(&global.ty));
-            translator.push_ins(Instruction::StoreGlobal(global.name.clone(), value));
+        DynType::Place(segments) => {
+            let segments = segments.clone();
+
+            let mut place = place;
+            for seg in segments.iter().take(segments.len().saturating_sub(2)) {
+                match seg {
+                    PathSegment::Local(local) => place = *local,
+                    PathSegment::Item(item) => {
+                        if let Some(global) =
+                            translator.ast.globals.iter().find(|v| &v.name == item)
+                        {
+                            let dst = translator.create_value(DynType::from(&global.ty));
+                            translator.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
+                            place = dst;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            match segments.last().unwrap() {
+                PathSegment::Local(local) => {
+                    todo!()
+                }
+                PathSegment::Item(item) => {
+                    if let Some(global) = translator.ast.globals.iter().find(|v| &v.name == item) {
+                        let value = convert_to(translator, value, DynType::from(&global.ty));
+                        translator.push_ins(Instruction::StoreGlobal(global.name.clone(), value));
+                        return;
+                    }
+                }
+            }
+
             return;
         }
         _ => {}
@@ -628,10 +668,7 @@ enum DynType {
     Int,
     Float,
     String,
-    /// A partial segment to a value.
-    Path(String),
-    Func(String),
-    PlaceGlobal(String),
+    Place(Vec<PathSegment>),
 }
 
 impl From<&Type> for DynType {
@@ -645,20 +682,8 @@ impl From<&Type> for DynType {
     }
 }
 
-impl DynType {
-    fn unwrap_func(&self) -> &str {
-        match self {
-            Self::Func(f) => f,
-            _ => unreachable!(),
-        }
-    }
-
-    fn unwrap_path(&self) -> &str {
-        match self {
-            Self::Path(v) => v,
-            Self::Func(v) => v,
-            Self::PlaceGlobal(v) => v,
-            _ => unreachable!(),
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PathSegment {
+    Local(Value),
+    Item(String),
 }

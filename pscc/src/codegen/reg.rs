@@ -82,6 +82,7 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                         callee: op.callee.clone(),
                         args,
                         returns: regs.alloc(op.returns),
+                        receiver: op.receiver.map(|r| regs.get(r)),
                     })
                 }
                 Instruction::Return(value) => Instruction::Return(regs.get(*value)),
