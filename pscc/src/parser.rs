@@ -572,6 +572,11 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 Some(token) if token.keyword() == Some(Keyword::Else) => {
+                    blocks.push(ConditionBlock {
+                        condition,
+                        statements,
+                    });
+
                     self.consume();
                     self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
 
