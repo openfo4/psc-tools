@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
-use crate::codegen::{Binop, Call, Cast, Instruction, Param, Unop};
+use crate::codegen::{Binop, Call, Callee, Cast, Instruction, Param, Unop};
 
 pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
     let dfg = DataFlowGraph::new(cfg);
@@ -79,10 +79,15 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
                     let args = op.args.iter().map(|arg| regs.get(*arg)).collect();
 
                     Instruction::Call(Call {
-                        callee: op.callee.clone(),
+                        callee: match op.callee.clone() {
+                            Callee::Local { object, func } => Callee::Local {
+                                object: regs.get(object),
+                                func,
+                            },
+                            Callee::Static { class, func } => Callee::Static { class, func },
+                        },
                         args,
                         returns: regs.alloc(op.returns),
-                        receiver: op.receiver.map(|r| regs.get(r)),
                     })
                 }
                 Instruction::Return(value) => Instruction::Return(regs.get(*value)),
@@ -282,7 +287,6 @@ where
         | Instruction::CmpGt(op)
         | Instruction::CmpGe(op)
         | Instruction::StringConcat(op)
-        | Instruction::Deref(op)
         | Instruction::Index(op) => binop(op),
         Instruction::Brif(condition, _, then_args, _, else_args) => {
             f(*condition);

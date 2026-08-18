@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter};
 
-use crate::codegen::Instruction;
 use crate::codegen::ssa::{BlockId, Value};
+use crate::codegen::{Callee, Instruction};
 
 #[derive(Clone, Debug)]
 pub struct ControlFlowGraph<T> {
@@ -142,9 +142,6 @@ where
                     Instruction::CmpGe(op) => {
                         writeln!(f, "{} = cmpge {} {}", op.dst, op.lhs, op.rhs)?
                     }
-                    Instruction::Deref(op) => {
-                        writeln!(f, "{} = deref {} {}", op.dst, op.lhs, op.rhs)?
-                    }
                     Instruction::Index(op) => {
                         writeln!(f, "{} = index {} {}", op.dst, op.lhs, op.rhs)?
                     }
@@ -185,16 +182,12 @@ where
                             .collect::<Vec<_>>()
                             .join(" ");
 
-                        match &op.receiver {
-                            Some(receiver) => {
-                                writeln!(
-                                    f,
-                                    "{} = call {} {} {}",
-                                    op.returns, receiver, op.callee, args
-                                )?;
+                        match &op.callee {
+                            Callee::Local { object, func } => {
+                                writeln!(f, "{} = call {} {} {}", op.returns, object, func, args)?;
                             }
-                            None => {
-                                writeln!(f, "{} = call {} {}", op.returns, op.callee, args)?;
+                            Callee::Static { class, func } => {
+                                writeln!(f, "{} = call {}.{} {}", op.returns, class, func, args)?;
                             }
                         }
                     }
@@ -276,7 +269,6 @@ impl DataFlowGraph {
                     | Instruction::CmpLe(op)
                     | Instruction::CmpGt(op)
                     | Instruction::CmpGe(op)
-                    | Instruction::Deref(op)
                     | Instruction::Index(op)
                     | Instruction::StringConcat(op) => {
                         uses.entry(op.lhs).or_default().push(loc);

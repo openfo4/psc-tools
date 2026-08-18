@@ -34,7 +34,6 @@ pub enum Instruction<T> {
     Call(Call<T>),
     Jmp(BlockId, Vec<T>),
     Brif(T, BlockId, Vec<T>, BlockId, Vec<T>),
-    Deref(Binop<T>),
     Index(Binop<T>),
     Store(Unop<T>),
     Return(T),
@@ -59,9 +58,7 @@ pub struct Binop<T> {
 
 #[derive(Clone, Debug)]
 struct Call<T> {
-    callee: String,
-    /// The receiver object if the call is non-static.
-    receiver: Option<T>,
+    callee: Callee<T>,
     args: Vec<T>,
     returns: T,
 }
@@ -135,11 +132,15 @@ impl<'a> Tranlsator<'a> {
         self.cur_block = Some(block);
     }
 
-    fn load_place(&mut self, value: Value) -> Value {
+    fn load_place(&mut self, value: Value, skip_last: usize) -> Value {
         match self.types.get(&value) {
             Some(DynType::Place(segments)) => {
                 let mut value = value;
-                for seg in segments.clone() {
+                for seg in segments
+                    .clone()
+                    .into_iter()
+                    .take(segments.len().saturating_sub(skip_last))
+                {
                     match seg {
                         PathSegment::Local(local) => value = local,
                         PathSegment::Item(item) => {
@@ -149,6 +150,15 @@ impl<'a> Tranlsator<'a> {
                                 value = dst;
                                 continue;
                             }
+
+                            if let Some(func) = self.ast.functions.iter().find(|v| v.name == item) {
+                                unreachable!(
+                                    "attempted to load function {} as part of place",
+                                    func.name
+                                );
+                            };
+
+                            unreachable!("unknown item {}", item)
                         }
                     }
                 }
@@ -165,18 +175,36 @@ impl<'a> Tranlsator<'a> {
         value
     }
 
-    fn load_place_as_func(&mut self, value: Value) -> (String, Option<Value>) {
+    fn load_place_as_func(&mut self, value: Value) -> Callee<Value> {
         match &self.types[&value] {
             DynType::Place(segments) => {
                 let mut segments: &[PathSegment] = &segments;
+                debug_assert_eq!(segments.len(), 2);
 
                 // The function name is the last segment.
                 let PathSegment::Item(func) = segments.split_off_last().unwrap() else {
                     unreachable!();
                 };
+
                 let func = func.to_owned();
-                let object = self.load_place(value);
-                (func, Some(object))
+                match &segments[0] {
+                    PathSegment::Local(local) => Callee::Local {
+                        object: *local,
+                        func,
+                    },
+                    PathSegment::Item(item) => {
+                        if let Some(global) = self.ast.globals.iter().find(|v| &v.name == item) {
+                            let dst = self.create_value(DynType::from(&global.ty));
+                            self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
+                            return Callee::Local { object: dst, func };
+                        }
+
+                        Callee::Static {
+                            class: item.to_owned(),
+                            func,
+                        }
+                    }
+                }
             }
             _ => todo!(),
         }
@@ -406,48 +434,48 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         Expr::CmpEq { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(DynType::Bool);
             translator.push_ins(Instruction::CmpEq(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpNe { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(DynType::Bool);
             translator.push_ins(Instruction::CmpNe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpLt { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(DynType::Bool);
             translator.push_ins(Instruction::CmpLt(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpLe { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(DynType::Bool);
             translator.push_ins(Instruction::CmpLe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpGt { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(DynType::Bool);
             translator.push_ins(Instruction::CmpGt(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::CmpGe { lhs, rhs } => {
             let lhs = load_place_expr(translator, lhs);
             let rhs = load_place_expr(translator, rhs);
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(DynType::Bool);
             translator.push_ins(Instruction::CmpGe(Binop { lhs, rhs, dst }));
             dst
         }
         Expr::Call { callee, args } => {
             let callee = lower_expr(translator, callee);
-            let (callee, receiver) = translator.load_place_as_func(callee);
+            let callee = translator.load_place_as_func(callee);
 
             let args: Vec<_> = args
                 .iter()
@@ -458,7 +486,6 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 callee,
                 args,
                 returns: dst,
-                receiver,
             }));
             dst
         }
@@ -540,7 +567,7 @@ fn convert_to(translator: &mut Tranlsator, src: Value, want: DynType) -> Value {
 
 fn load_place_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
     let place = lower_expr(translator, expr);
-    translator.load_place(place)
+    translator.load_place(place, 0)
 }
 
 /// Stores the given `value` into the given place expression `dst`.
@@ -630,7 +657,7 @@ fn lower_arithmetic_binop(
             ArithmeticBinop::Add => Instruction::FAdd(Binop { lhs, rhs, dst }),
             ArithmeticBinop::Sub => Instruction::FSub(Binop { lhs, rhs, dst }),
             ArithmeticBinop::Mul => Instruction::FMul(Binop { lhs, rhs, dst }),
-            ArithmeticBinop::Div => Instruction::FMul(Binop { lhs, rhs, dst }),
+            ArithmeticBinop::Div => Instruction::FDiv(Binop { lhs, rhs, dst }),
             ArithmeticBinop::Rem => Instruction::FRem(Binop { lhs, rhs, dst }),
         };
 
@@ -643,7 +670,7 @@ fn lower_arithmetic_binop(
         ArithmeticBinop::Add => Instruction::IAdd(Binop { lhs, rhs, dst }),
         ArithmeticBinop::Sub => Instruction::ISub(Binop { lhs, rhs, dst }),
         ArithmeticBinop::Mul => Instruction::IMul(Binop { lhs, rhs, dst }),
-        ArithmeticBinop::Div => Instruction::IMul(Binop { lhs, rhs, dst }),
+        ArithmeticBinop::Div => Instruction::IDiv(Binop { lhs, rhs, dst }),
         ArithmeticBinop::Rem => Instruction::IRem(Binop { lhs, rhs, dst }),
     };
 
@@ -699,4 +726,10 @@ impl From<&Type> for DynType {
 enum PathSegment {
     Local(Value),
     Item(String),
+}
+
+#[derive(Clone, Debug)]
+enum Callee<T> {
+    Local { object: T, func: String },
+    Static { class: String, func: String },
 }
