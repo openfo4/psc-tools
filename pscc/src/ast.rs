@@ -27,7 +27,7 @@ pub struct Property {
     pub is_const: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     None,
     Bool,

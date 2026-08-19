@@ -175,13 +175,15 @@ pub fn ssa_to_reg(
         );
     });
 
-    // We can extract the register type info because all registers
-    // are retired at the very end.
     let mut register_types = HashMap::new();
     for (ty, regs) in regs.retired {
         for reg in regs {
             register_types.insert(reg, ty.clone());
         }
+    }
+    for (val, reg) in regs.registers {
+        let ty = regs.value_types[&val].clone();
+        register_types.insert(reg, ty);
     }
 
     (

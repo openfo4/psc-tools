@@ -6,6 +6,7 @@ mod ssa;
 use std::collections::HashMap;
 use std::debug_assert_matches;
 
+use crate::StringBuilder;
 use crate::ast::{Ast, Expr, Function, Statement, Type};
 use crate::codegen::func::{Block, ControlFlowGraph};
 use crate::codegen::reg::Register;
@@ -250,7 +251,7 @@ impl<'a> Tranlsator<'a> {
     }
 }
 
-pub fn lower_function(ast: &Ast, func: &Function) -> pex::Function {
+pub fn lower_function(ast: &Ast, func: &Function, strings: &mut StringBuilder) -> pex::Function {
     let mut translator = Tranlsator::new(ast, func);
 
     let mut params = Vec::new();
@@ -322,7 +323,7 @@ pub fn lower_function(ast: &Ast, func: &Function) -> pex::Function {
         regtys,
     };
 
-    lowering::lower_to_pex(&func)
+    lowering::lower_to_pex(&func, strings)
 }
 
 fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {

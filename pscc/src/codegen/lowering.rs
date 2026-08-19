@@ -1,16 +1,15 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::StringBuilder;
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::BlockId;
 use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction, PropertyRef};
 use crate::lexer::Literal;
 
-use pex::{
-    CallMethod, CallStatic, ConditionalBranch, Instruction as PexInstruction, PropertyGet, Unop,
-    Value, VariableDefinition,
-};
+use pex::instruction::{CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet};
+use pex::{Value, VariableDefinition, instruction as pexins};
 
-pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
+pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Function {
     let mut params = Vec::new();
     let mut locals = Vec::new();
 
@@ -24,13 +23,18 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         schedule_succ.insert(*src, *dst);
     }
 
+    let mut reg_names = HashMap::new();
+    for (reg, _) in &func.regtys {
+        reg_names.insert(*reg, strings.insert(&reg.to_string()));
+    }
+
     func.cfg.visit_bfs(|id, block| {
         let mut instructions = Vec::new();
 
-        let convert_binop = |op: &Binop<Register>| pex::Binop {
-            lhs: Value::Ident(op.lhs.to_string()),
-            rhs: Value::Ident(op.rhs.to_string()),
-            dst: Value::Ident(op.dst.to_string()),
+        let convert_binop = |op: &Binop<Register>| pex::instruction::Binop {
+            lhs: Value::Ident(reg_names[&op.lhs]),
+            rhs: Value::Ident(reg_names[&op.rhs]),
+            dst: Value::Ident(reg_names[&op.dst]),
         };
 
         for ins in &block.instructions {
@@ -42,16 +46,16 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                         local_regs.remove(&p.value);
 
                         params.push(pex::VariableDefinition {
-                            name: p.value.to_string(),
-                            ty: p.ty.to_string(),
+                            name: reg_names[&p.value],
+                            ty: strings.insert(&p.ty.to_string()),
                         });
                     }
 
                     for reg in local_regs {
                         let ty = &func.regtys[&reg];
                         locals.push(VariableDefinition {
-                            name: reg.to_string(),
-                            ty: ty.to_string(),
+                            name: reg_names[&reg],
+                            ty: strings.insert(&ty.to_string()),
                         })
                     }
 
@@ -60,42 +64,46 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                 // We always directly embed literals as immediate values in the
                 // instructions where they are used.
                 // The literal values themselves are never used.
-                Instruction::Literal(lit, dst) => pex::Instruction::Store(Unop {
-                    src: match lit {
-                        Literal::NumberInt(value) => Value::Int(*value),
-                        _ => todo!(),
-                    },
-                    dst: Value::Ident(dst.to_string()),
+                Instruction::Literal(lit, dst) => {
+                    pexins::Instruction::Store(pex::instruction::Unop {
+                        src: match lit {
+                            Literal::NumberInt(value) => Value::Int(*value),
+                            _ => todo!(),
+                        },
+                        dst: Value::Ident(reg_names[dst]),
+                    })
+                }
+                Instruction::Store(op) => pexins::Instruction::Store(pex::instruction::Unop {
+                    src: Value::Ident(reg_names[&op.src]),
+                    dst: Value::Ident(reg_names[&op.dst]),
                 }),
-                Instruction::Store(op) => pex::Instruction::Store(pex::Unop {
-                    src: Value::Ident(op.src.to_string()),
-                    dst: Value::Ident(op.dst.to_string()),
-                }),
-                Instruction::IAdd(op) => pex::Instruction::IAdd(convert_binop(op)),
-                Instruction::ISub(op) => pex::Instruction::ISub(convert_binop(op)),
-                Instruction::IMul(op) => pex::Instruction::IMul(convert_binop(op)),
-                Instruction::IDiv(op) => pex::Instruction::IDiv(convert_binop(op)),
-                Instruction::IRem(op) => pex::Instruction::IMod(convert_binop(op)),
-                Instruction::FAdd(op) => pex::Instruction::FAdd(convert_binop(op)),
-                Instruction::FSub(op) => pex::Instruction::FSub(convert_binop(op)),
-                Instruction::FMul(op) => pex::Instruction::FMul(convert_binop(op)),
-                Instruction::FDiv(op) => pex::Instruction::FDiv(convert_binop(op)),
+                Instruction::IAdd(op) => pexins::Instruction::IAdd(convert_binop(op)),
+                Instruction::ISub(op) => pexins::Instruction::ISub(convert_binop(op)),
+                Instruction::IMul(op) => pexins::Instruction::IMul(convert_binop(op)),
+                Instruction::IDiv(op) => pexins::Instruction::IDiv(convert_binop(op)),
+                Instruction::IRem(op) => pexins::Instruction::IMod(convert_binop(op)),
+                Instruction::FAdd(op) => pexins::Instruction::FAdd(convert_binop(op)),
+                Instruction::FSub(op) => pexins::Instruction::FSub(convert_binop(op)),
+                Instruction::FMul(op) => pexins::Instruction::FMul(convert_binop(op)),
+                Instruction::FDiv(op) => pexins::Instruction::FDiv(convert_binop(op)),
                 Instruction::FRem(op) => todo!(),
-                Instruction::StringConcat(op) => pex::Instruction::StringConcat(convert_binop(op)),
-                Instruction::CmpEq(op) => pex::Instruction::CmpEq(convert_binop(op)),
+                Instruction::StringConcat(op) => {
+                    pexins::Instruction::StringConcat(convert_binop(op))
+                }
+                Instruction::CmpEq(op) => pexins::Instruction::CmpEq(convert_binop(op)),
                 Instruction::CmpNe(op) => todo!(),
-                Instruction::CmpLt(op) => pex::Instruction::CmpLt(convert_binop(op)),
-                Instruction::CmpLe(op) => pex::Instruction::CmpLe(convert_binop(op)),
-                Instruction::CmpGt(op) => pex::Instruction::CmpGt(convert_binop(op)),
-                Instruction::CmpGe(op) => pex::Instruction::CmpGe(convert_binop(op)),
+                Instruction::CmpLt(op) => pexins::Instruction::CmpLt(convert_binop(op)),
+                Instruction::CmpLe(op) => pexins::Instruction::CmpLe(convert_binop(op)),
+                Instruction::CmpGt(op) => pexins::Instruction::CmpGt(convert_binop(op)),
+                Instruction::CmpGe(op) => pexins::Instruction::CmpGe(convert_binop(op)),
                 Instruction::Return(value) => {
-                    PexInstruction::Return(Value::Ident(value.to_string()))
+                    pexins::Instruction::Return(Value::Ident(reg_names[value]))
                 }
                 Instruction::Brif(condition, then_block, then_args, else_block, else_args) => {
                     debug_assert!(then_args.is_empty());
                     debug_assert!(else_args.is_empty());
 
-                    let condition = Value::Ident(condition.to_string());
+                    let condition = Value::Ident(reg_names[condition]);
 
                     let succ = schedule_succ.get(&id).unwrap();
                     if *succ == *then_block {
@@ -105,7 +113,7 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                             target: *else_block,
                         });
 
-                        pex::Instruction::BranchIfFalse(ConditionalBranch {
+                        pexins::Instruction::JumpIfFalse(ConditionalJump {
                             condition,
                             offset: 0,
                         })
@@ -116,7 +124,7 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                             target: *then_block,
                         });
 
-                        pex::Instruction::BranchIfTrue(ConditionalBranch {
+                        pexins::Instruction::JumpIfTrue(ConditionalJump {
                             condition,
                             offset: 0,
                         })
@@ -138,60 +146,64 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
                         target: *block,
                     });
 
-                    pex::Instruction::Branch(pex::Branch { offset: 0 })
+                    pexins::Instruction::Jump(Jump { offset: 0 })
                 }
-                Instruction::LoadGlobal(global, dst) => pex::Instruction::Store(Unop {
-                    src: Value::Ident(global.clone()),
-                    dst: Value::Ident(dst.to_string()),
-                }),
-                Instruction::StoreGlobal(global, src) => pex::Instruction::Store(Unop {
-                    src: Value::Ident(src.to_string()),
-                    dst: Value::Ident(global.clone()),
-                }),
+                Instruction::LoadGlobal(global, dst) => {
+                    pexins::Instruction::Store(pex::instruction::Unop {
+                        src: Value::Ident(strings.insert(global)),
+                        dst: Value::Ident(reg_names[dst]),
+                    })
+                }
+                Instruction::StoreGlobal(global, src) => {
+                    pexins::Instruction::Store(pex::instruction::Unop {
+                        src: Value::Ident(reg_names[src]),
+                        dst: Value::Ident(strings.insert(global)),
+                    })
+                }
                 Instruction::Call(op) => {
                     let args = op
                         .args
                         .iter()
-                        .map(|arg| Value::Ident(arg.to_string()))
+                        .map(|arg| Value::Ident(reg_names[arg]))
                         .collect();
-                    let return_assignment = Value::Ident(op.returns.to_string());
+                    let return_assignment = Value::Ident(reg_names[&op.returns]);
 
                     match &op.callee {
                         Callee::Local { object, func } => {
-                            pex::Instruction::CallMethod(CallMethod {
-                                function_name: func.clone(),
-                                object: Value::Ident(object.to_string()),
+                            pexins::Instruction::CallMethod(CallMethod {
+                                function_name: strings.insert(func),
+                                object: Value::Ident(reg_names[object]),
                                 return_assignment,
                                 args,
                             })
                         }
                         Callee::Static { class, func } => {
-                            pex::Instruction::CallStatic(CallStatic {
-                                class: class.clone(),
-                                function: func.clone(),
+                            pexins::Instruction::CallStatic(CallStatic {
+                                class: strings.insert(class),
+                                function: strings.insert(func),
                                 args,
                                 return_assignment,
                             })
                         }
-                        Callee::LocalSelf { func } => pex::Instruction::CallMethod(CallMethod {
-                            function_name: func.clone(),
-                            object: Value::Ident("self".to_owned()),
+                        Callee::LocalSelf { func } => pexins::Instruction::CallMethod(CallMethod {
+                            function_name: strings.insert(func),
+                            object: Value::Ident(strings.insert("self")),
                             return_assignment,
                             args,
                         }),
                     }
                 }
                 Instruction::GetProperty(prop, dst) => match prop {
-                    PropertyRef::Local(name) => pex::Instruction::PropertyGet(PropertyGet {
-                        property: name.clone(),
-                        value: Value::Ident("self".to_owned()),
-                        return_assignment: Value::Ident(dst.to_string()),
+                    PropertyRef::Local(name) => pexins::Instruction::PropertyGet(PropertyGet {
+                        property: strings.insert(name),
+                        value: Value::Ident(strings.insert("self")),
+                        return_assignment: Value::Ident(reg_names[dst]),
                     }),
                     PropertyRef::Other(object, name) => {
-                        pex::Instruction::PropertyGet(PropertyGet {
-                            property: name.clone(),
-                            value: Value::Ident(object.to_string()),
-                            return_assignment: Value::Ident(dst.to_string()),
+                        pexins::Instruction::PropertyGet(PropertyGet {
+                            property: strings.insert(name),
+                            value: Value::Ident(strings.insert(&object.to_string())),
+                            return_assignment: Value::Ident(reg_names[dst]),
                         })
                     }
                 },
@@ -217,8 +229,8 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         let offset = target as i32 - source as i32;
 
         match &mut instructions[source] {
-            pex::Instruction::Branch(op) => op.offset = offset,
-            pex::Instruction::BranchIfTrue(op) | pex::Instruction::BranchIfFalse(op) => {
+            pexins::Instruction::Jump(op) => op.offset = offset,
+            pexins::Instruction::JumpIfTrue(op) | pexins::Instruction::JumpIfFalse(op) => {
                 op.offset = offset
             }
             _ => unreachable!(),
@@ -232,13 +244,14 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         .unwrap_or_else(|| "none".to_string());
 
     pex::Function {
-        name: func.name.clone(),
         is_static: func.is_static,
         is_native: false,
         locals,
         params,
-        return_ty,
+        return_ty: strings.insert(&return_ty),
         instructions,
+        docstring: strings.insert(""),
+        user_flags: 0,
     }
 }
 
