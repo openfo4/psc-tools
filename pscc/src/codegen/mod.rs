@@ -339,7 +339,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
         } => {
             let merge_block = translator.create_block();
 
-            let next_block = translator.create_block();
+            let mut next_block = translator.create_block();
             for block in then_blocks {
                 let then_block = translator.create_block();
 
@@ -364,6 +364,8 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
 
                 translator.switch_to_block(next_block);
                 translator.ssa.seal(next_block);
+
+                next_block = translator.ssa.create_block();
             }
 
             for stmt in else_block {
