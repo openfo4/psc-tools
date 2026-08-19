@@ -326,7 +326,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
                 .insert(var, TypeOrPlace::Type(def.ty.clone()));
 
             if let Some(expr) = &def.value {
-                let value = lower_expr(translator, expr);
+                let value = load_place_expr(translator, expr);
                 translator.ssa.def_var(var, value);
             }
         }
