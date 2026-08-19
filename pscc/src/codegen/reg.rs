@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
+use crate::ast::Type;
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
 use crate::codegen::{Binop, Call, Callee, Cast, Instruction, Param, Unop};
 
-pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
+pub fn ssa_to_reg(
+    cfg: &ControlFlowGraph<Value>,
+    value_types: HashMap<Value, Type>,
+) -> (ControlFlowGraph<Register>, HashMap<Register, Type>) {
     let dfg = DataFlowGraph::new(cfg);
 
-    let mut regs = RegisterPool::default();
+    let mut regs = RegisterPool::new(value_types);
 
     let mut blocks = HashMap::new();
 
@@ -171,22 +175,47 @@ pub fn ssa_to_reg(cfg: &ControlFlowGraph<Value>) -> ControlFlowGraph<Register> {
         );
     });
 
-    ControlFlowGraph {
-        blocks,
-        entry: cfg.entry,
+    // We can extract the register type info because all registers
+    // are retired at the very end.
+    let mut register_types = HashMap::new();
+    for (ty, regs) in regs.retired {
+        for reg in regs {
+            register_types.insert(reg, ty.clone());
+        }
     }
+
+    (
+        ControlFlowGraph {
+            blocks,
+            entry: cfg.entry,
+        },
+        register_types,
+    )
 }
 
 #[derive(Clone, Debug, Default)]
 struct RegisterPool {
     next: usize,
     registers: HashMap<Value, Register>,
-    retired: Vec<Register>,
+    retired: HashMap<Type, Vec<Register>>,
+    value_types: HashMap<Value, Type>,
 }
 
 impl RegisterPool {
+    fn new(value_types: HashMap<Value, Type>) -> Self {
+        Self {
+            next: 0,
+            registers: HashMap::new(),
+            retired: HashMap::new(),
+            value_types,
+        }
+    }
+
     fn alloc(&mut self, value: Value) -> Register {
-        if let Some(reg) = self.retired.pop() {
+        let ty = &self.value_types[&value];
+        if let Some(regs) = self.retired.get_mut(ty)
+            && let Some(reg) = regs.pop()
+        {
             self.registers.insert(value, reg);
             return reg;
         }
@@ -199,19 +228,13 @@ impl RegisterPool {
 
     fn try_retire(&mut self, value: Value) {
         if let Some(reg) = self.registers.get(&value) {
-            self.retired.push(*reg);
+            let ty = &self.value_types[&value];
+            self.retired.entry(ty.clone()).or_default().push(*reg);
         }
     }
 
     fn get(&self, value: Value) -> Register {
         self.registers[&value]
-    }
-
-    fn get_or_alloc(&mut self, value: Value) -> Register {
-        match self.registers.get(&value) {
-            Some(reg) => *reg,
-            None => self.alloc(value),
-        }
     }
 
     fn try_alloc_preferred_or_get(
@@ -230,15 +253,19 @@ impl RegisterPool {
     /// If possible the new register will be `preferred`, otherwise `Err(..)` with a new register
     /// is returned.
     fn try_alloc_preferred(&mut self, value: Value, preferred: Register) -> Result<(), Register> {
+        let ty = &self.value_types[&value];
+
         let mut preferred_usable = false;
-        self.retired.retain(|reg| {
-            if *reg == preferred {
-                preferred_usable = true;
-                false
-            } else {
-                true
-            }
-        });
+        if let Some(regs) = self.retired.get_mut(ty) {
+            regs.retain(|reg| {
+                if *reg == preferred {
+                    preferred_usable = true;
+                    false
+                } else {
+                    true
+                }
+            });
+        }
 
         if preferred_usable {
             self.registers.insert(value, preferred);

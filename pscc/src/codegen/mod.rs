@@ -303,13 +303,23 @@ pub fn lower_function(ast: &Ast, func: &Function) -> pex::Function {
         blocks,
     };
 
-    let regcfg = reg::ssa_to_reg(&cfg);
+    // Places are a compile-time only concept and do not exist at runtime.
+    // There are no instructions that define or use place "values" in the CFG.
+    let mut value_types = HashMap::new();
+    for (value, ty) in translator.types {
+        if let TypeOrPlace::Type(ty) = ty {
+            value_types.insert(value, ty);
+        }
+    }
+
+    let (regcfg, regtys) = reg::ssa_to_reg(&cfg, value_types);
 
     let func = FuncInfo {
         name: func.name.clone(),
         cfg: regcfg.clone(),
         is_static: func.is_global,
         return_ty: func.return_ty.clone(),
+        regtys,
     };
 
     lowering::lower_to_pex(&func)
@@ -527,7 +537,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 .iter()
                 .map(|arg| load_place_expr(translator, arg))
                 .collect();
-            let dst = translator.ssa.create_value();
+            let dst = translator.create_value(Type::None);
             translator.push_ins(Instruction::Call(Call {
                 callee,
                 args,
@@ -748,6 +758,7 @@ pub struct FuncInfo {
     is_static: bool,
     cfg: ControlFlowGraph<Register>,
     return_ty: Option<Type>,
+    regtys: HashMap<Register, Type>,
 }
 
 #[derive(Clone, Debug)]

@@ -7,11 +7,12 @@ use crate::lexer::Literal;
 
 use pex::{
     CallMethod, CallStatic, ConditionalBranch, Instruction as PexInstruction, PropertyGet, Unop,
-    Value,
+    Value, VariableDefinition,
 };
 
 pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
     let mut params = Vec::new();
+    let mut locals = Vec::new();
 
     let mut branches = Vec::new();
 
@@ -35,11 +36,23 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         for ins in &block.instructions {
             let out = match ins {
                 Instruction::AddParams(p) => {
+                    let mut local_regs: HashSet<_> = func.regtys.keys().copied().collect();
+
                     for p in p {
+                        local_regs.remove(&p.value);
+
                         params.push(pex::VariableDefinition {
                             name: p.value.to_string(),
                             ty: p.ty.to_string(),
                         });
+                    }
+
+                    for reg in local_regs {
+                        let ty = &func.regtys[&reg];
+                        locals.push(VariableDefinition {
+                            name: reg.to_string(),
+                            ty: ty.to_string(),
+                        })
                     }
 
                     continue;
@@ -212,11 +225,6 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         }
     }
 
-    // for id in schedule_blocks(&func.cfg) {
-    //     let block = blocks.remove(&id).unwrap();
-    //     instructions.extend(block);
-    // }
-
     let return_ty = func
         .return_ty
         .as_ref()
@@ -227,7 +235,7 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         name: func.name.clone(),
         is_static: func.is_static,
         is_native: false,
-        locals: Vec::new(),
+        locals,
         params,
         return_ty,
         instructions,
