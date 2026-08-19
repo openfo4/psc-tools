@@ -15,6 +15,7 @@ pub struct SsaBuilder {
     next_value: Value,
     next_var: Var,
     cur_block: BlockId,
+    var_values: HashMap<Var, Vec<Value>>,
 }
 
 impl SsaBuilder {
@@ -24,6 +25,7 @@ impl SsaBuilder {
             next_value: Value(0),
             next_var: Var(0),
             cur_block: BlockId(usize::MAX),
+            var_values: HashMap::new(),
         }
     }
 
@@ -56,6 +58,7 @@ impl SsaBuilder {
                 self.next_value.0 += 1;
                 block.undef_values.push((var, value));
                 block.values.insert(var, value);
+                self.var_values.entry(var).or_default().push(value);
                 break value;
             }
 
@@ -71,6 +74,7 @@ impl SsaBuilder {
 
             block.params.push(value);
             block.values.insert(var, value);
+            self.var_values.entry(var).or_default().push(value);
 
             let id = block.id;
             for pred in block.pred.clone() {
@@ -107,6 +111,8 @@ impl SsaBuilder {
                     self.next_value.0 += 1;
                     cur_block.undef_values.push((var, value));
                     cur_block.values.insert(var, value);
+                    self.var_values.entry(var).or_default().push(value);
+
                     break value;
                 }
 
@@ -122,6 +128,7 @@ impl SsaBuilder {
 
                 cur_block.params.push(value);
                 cur_block.values.insert(var, value);
+                self.var_values.entry(var).or_default().push(value);
 
                 for block in &cur_block.pred {
                     queue.push_back((cur_block.id, *block, var));
@@ -226,6 +233,13 @@ impl SsaBuilder {
             .find(|b| b.block == to)
             .unwrap()
             .params
+    }
+
+    pub fn var_values(&self, var: Var) -> &[Value] {
+        self.var_values
+            .get(&var)
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
     }
 }
 

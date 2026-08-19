@@ -142,6 +142,7 @@ impl<'a> Tranlsator<'a> {
         match self.types.get(&value) {
             Some(TypeOrPlace::Place(segments)) => {
                 let mut value = value;
+
                 'out: for seg in segments
                     .clone()
                     .into_iter()
@@ -249,7 +250,7 @@ impl<'a> Tranlsator<'a> {
     }
 }
 
-pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
+pub fn lower_function(ast: &Ast, func: &Function) -> pex::Function {
     let mut translator = Tranlsator::new(ast, func);
 
     let mut params = Vec::new();
@@ -302,10 +303,7 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
         blocks,
     };
 
-    println!("{}", cfg);
     let regcfg = reg::ssa_to_reg(&cfg);
-
-    println!("{}", regcfg);
 
     let func = FuncInfo {
         name: func.name.clone(),
@@ -314,10 +312,7 @@ pub fn lower_function(ast: &Ast, func: &Function) -> ControlFlowGraph<Value> {
         return_ty: func.return_ty.clone(),
     };
 
-    let f = lowering::lower_to_pex(&func);
-    dbg!(&f);
-
-    cfg
+    lowering::lower_to_pex(&func)
 }
 
 fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
@@ -447,16 +442,22 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             // Identifier is a regular stack-local variable.
             if let Some(var) = translator.variables.get(ident) {
                 let value = translator.ssa.use_var(*var);
+
+                // During SSA construction a variable use may insert additional
+                // values as phi parameters in other blocks.
+                // We must keep track of the type of all implicitly created values.
+                for val in translator.ssa.var_values(*var) {
+                    translator
+                        .types
+                        .insert(*val, translator.var_types[var].clone());
+                }
+
                 return value;
             }
 
             // Otherwise the identifier is a plain type/value name that needs to
             // be reconstructed into a value by a deref operation.
-            let value = translator.ssa.create_value();
-            translator.types.insert(
-                value,
-                TypeOrPlace::Place(vec![PathSegment::Item(ident.to_owned())]),
-            );
+            let value = translator.create_place(vec![PathSegment::Item(ident.to_owned())]);
             value
         }
         Expr::Add { lhs, rhs } => {

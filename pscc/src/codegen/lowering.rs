@@ -23,8 +23,6 @@ pub fn lower_to_pex(func: &FuncInfo) -> pex::Function {
         schedule_succ.insert(*src, *dst);
     }
 
-    dbg!(&schedule);
-
     func.cfg.visit_bfs(|id, block| {
         let mut instructions = Vec::new();
 
