@@ -6,6 +6,8 @@ mod ssa;
 use std::collections::HashMap;
 use std::debug_assert_matches;
 
+use pex::VariableDefinition;
+
 use crate::StringBuilder;
 use crate::ast::{Ast, Expr, Function, Statement, Type};
 use crate::codegen::func::{Block, ControlFlowGraph};
@@ -251,7 +253,22 @@ impl<'a> Tranlsator<'a> {
     }
 }
 
-pub fn lower_function(ast: &Ast, func: &Function, strings: &mut StringBuilder) -> pex::Function {
+#[derive(Clone, Debug)]
+pub struct CodegenOptions {
+    /// Whether to preserve the exact names of parameters in the compiled function.
+    pub preserve_parameter_names: bool,
+}
+
+pub fn lower_function(
+    ast: &Ast,
+    func: &Function,
+    strings: &mut StringBuilder,
+    opts: &CodegenOptions,
+) -> pex::Function {
+    if func.is_native {
+        return lower_native_function(func, strings, opts);
+    }
+
     let mut translator = Tranlsator::new(ast, func);
 
     let mut params = Vec::new();
@@ -791,4 +808,44 @@ enum Callee<T> {
 enum PropertyRef<T> {
     Local(String),
     Other(T, String),
+}
+
+fn lower_native_function(
+    func: &Function,
+    strings: &mut StringBuilder,
+    opts: &CodegenOptions,
+) -> pex::Function {
+    let return_ty = match &func.return_ty {
+        Some(ty) => strings.insert(&ty.to_string()),
+        None => strings.insert("none"),
+    };
+
+    let params = func
+        .params
+        .iter()
+        .enumerate()
+        .map(|(index, param)| {
+            let name = if opts.preserve_parameter_names {
+                strings.insert(&param.name)
+            } else {
+                strings.insert(&format!("r{}", index))
+            };
+
+            VariableDefinition {
+                name,
+                ty: strings.insert(&param.ty.to_string()),
+            }
+        })
+        .collect();
+
+    pex::Function {
+        return_ty,
+        docstring: strings.insert(""),
+        user_flags: 0,
+        is_static: func.is_global,
+        is_native: true,
+        params,
+        locals: Vec::new(),
+        instructions: Vec::new(),
+    }
 }

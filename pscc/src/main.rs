@@ -17,13 +17,16 @@ use codespan_reporting::term::{self, Config};
 use pex::{Class, Module, NamedFunction, State, StringKey, StringTable};
 
 use crate::ast::Ast;
+use crate::codegen::CodegenOptions;
 use crate::registry::{ClassInfo, Registry};
 
 #[derive(Clone, Debug, Parser)]
 struct Args {
     input: PathBuf,
+    /// Directory or file to import external definitions.
     #[arg(short, long)]
     import: Vec<PathBuf>,
+    /// Output directory for compiled scripts.
     #[arg(long, default_value = ".")]
     out_dir: PathBuf,
 }
@@ -127,7 +130,14 @@ fn compile_module(ast: &Ast) -> pex::Module {
 
     let mut functions = Vec::new();
     for func in &ast.functions {
-        let function = codegen::lower_function(&ast, func, &mut strings);
+        let function = codegen::lower_function(
+            &ast,
+            func,
+            &mut strings,
+            &CodegenOptions {
+                preserve_parameter_names: true,
+            },
+        );
         functions.push(NamedFunction {
             name: strings.insert(&func.name),
             function,
