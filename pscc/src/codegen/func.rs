@@ -109,6 +109,9 @@ where
                     Instruction::IRem(op) => {
                         writeln!(f, "{} = irem {} {}", op.dst, op.lhs, op.rhs)?
                     }
+                    Instruction::INeg(op) => {
+                        writeln!(f, "{} = ineg {}", op.dst, op.src)?;
+                    }
                     Instruction::FAdd(op) => {
                         writeln!(f, "{} = fadd {} {}", op.dst, op.lhs, op.rhs)?
                     }
@@ -123,6 +126,12 @@ where
                     }
                     Instruction::FRem(op) => {
                         writeln!(f, "{} = frem {} {}", op.dst, op.lhs, op.rhs)?
+                    }
+                    Instruction::FNeg(op) => {
+                        writeln!(f, "{} = fneg {}", op.dst, op.src)?;
+                    }
+                    Instruction::BNot(op) => {
+                        writeln!(f, "{} = bnot {}", op.dst, op.src)?;
                     }
                     Instruction::CmpEq(op) => {
                         writeln!(f, "{} = cmpeq {} {}", op.dst, op.lhs, op.rhs)?
@@ -284,7 +293,10 @@ impl DataFlowGraph {
                         uses.entry(op.rhs).or_default().push(loc);
                         defs.insert(op.dst, loc);
                     }
-                    Instruction::Store(op) => {
+                    Instruction::Store(op)
+                    | Instruction::INeg(op)
+                    | Instruction::FNeg(op)
+                    | Instruction::BNot(op) => {
                         uses.entry(op.src).or_default().push(loc);
                         defs.insert(op.dst, loc);
                     }

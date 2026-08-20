@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::StringBuilder;
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::BlockId;
-use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction, PropertyRef};
+use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction, PropertyRef, Unop};
 use crate::lexer::Literal;
 
 use pex::instruction::{CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet, PropertySet};
@@ -34,6 +34,11 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
         let convert_binop = |op: &Binop<Register>| pex::instruction::Binop {
             lhs: Value::Ident(reg_names[&op.lhs]),
             rhs: Value::Ident(reg_names[&op.rhs]),
+            dst: Value::Ident(reg_names[&op.dst]),
+        };
+
+        let convert_unop = |op: &Unop<Register>| pex::instruction::Unop {
+            src: Value::Ident(reg_names[&op.src]),
             dst: Value::Ident(reg_names[&op.dst]),
         };
 
@@ -68,6 +73,7 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                     pexins::Instruction::Store(pex::instruction::Unop {
                         src: match lit {
                             Literal::None => Value::Null,
+                            Literal::Bool(value) => Value::Bool(*value),
                             Literal::NumberInt(value) => Value::Int(*value),
                             _ => todo!(),
                         },
@@ -83,14 +89,17 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                 Instruction::IMul(op) => pexins::Instruction::IMul(convert_binop(op)),
                 Instruction::IDiv(op) => pexins::Instruction::IDiv(convert_binop(op)),
                 Instruction::IRem(op) => pexins::Instruction::IMod(convert_binop(op)),
+                Instruction::INeg(op) => pexins::Instruction::INeg(convert_unop(op)),
                 Instruction::FAdd(op) => pexins::Instruction::FAdd(convert_binop(op)),
                 Instruction::FSub(op) => pexins::Instruction::FSub(convert_binop(op)),
                 Instruction::FMul(op) => pexins::Instruction::FMul(convert_binop(op)),
                 Instruction::FDiv(op) => pexins::Instruction::FDiv(convert_binop(op)),
                 Instruction::FRem(op) => todo!(),
+                Instruction::FNeg(op) => pexins::Instruction::FNeg(convert_unop(op)),
                 Instruction::StringConcat(op) => {
                     pexins::Instruction::StringConcat(convert_binop(op))
                 }
+                Instruction::BNot(op) => pexins::Instruction::Not(convert_unop(op)),
                 Instruction::CmpEq(op) => pexins::Instruction::CmpEq(convert_binop(op)),
                 Instruction::CmpNe(op) => todo!(),
                 Instruction::CmpLt(op) => pexins::Instruction::CmpLt(convert_binop(op)),

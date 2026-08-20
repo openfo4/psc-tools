@@ -67,11 +67,23 @@ pub fn ssa_to_reg(
                 Instruction::IMul(op) => Instruction::IMul(convert_binop(op)),
                 Instruction::IDiv(op) => Instruction::IDiv(convert_binop(op)),
                 Instruction::IRem(op) => Instruction::IRem(convert_binop(op)),
+                Instruction::INeg(op) => Instruction::INeg(Unop {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                }),
                 Instruction::FAdd(op) => Instruction::FAdd(convert_binop(op)),
                 Instruction::FSub(op) => Instruction::FSub(convert_binop(op)),
                 Instruction::FMul(op) => Instruction::FMul(convert_binop(op)),
                 Instruction::FDiv(op) => Instruction::FDiv(convert_binop(op)),
                 Instruction::FRem(op) => Instruction::FRem(convert_binop(op)),
+                Instruction::FNeg(op) => Instruction::FNeg(Unop {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                }),
+                Instruction::BNot(op) => Instruction::BNot(Unop {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                }),
                 Instruction::CmpEq(op) => Instruction::CmpEq(convert_binop(op)),
                 Instruction::CmpNe(op) => Instruction::CmpNe(convert_binop(op)),
                 Instruction::CmpLt(op) => Instruction::CmpLt(convert_binop(op)),
@@ -337,6 +349,12 @@ where
         | Instruction::CmpGe(op)
         | Instruction::StringConcat(op)
         | Instruction::Index(op) => binop(op),
+        Instruction::Store(op)
+        | Instruction::INeg(op)
+        | Instruction::FNeg(op)
+        | Instruction::BNot(op) => {
+            f(op.src);
+        }
         Instruction::Brif(condition, _, then_args, _, else_args) => {
             f(*condition);
             for arg in then_args.iter().chain(else_args) {

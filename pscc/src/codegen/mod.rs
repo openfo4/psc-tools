@@ -24,11 +24,13 @@ pub enum Instruction<T> {
     IMul(Binop<T>),
     IDiv(Binop<T>),
     IRem(Binop<T>),
+    INeg(Unop<T>),
     FAdd(Binop<T>),
     FSub(Binop<T>),
     FMul(Binop<T>),
     FDiv(Binop<T>),
     FRem(Binop<T>),
+    FNeg(Unop<T>),
     CmpEq(Binop<T>),
     CmpNe(Binop<T>),
     CmpLt(Binop<T>),
@@ -47,6 +49,7 @@ pub enum Instruction<T> {
     StringConcat(Binop<T>),
     GetProperty(PropertyRef<T>, T),
     SetProperty(PropertyRef<T>, T),
+    BNot(Unop<T>),
 }
 
 #[derive(Clone, Debug)]
@@ -341,7 +344,6 @@ pub fn lower_function(
     }
 
     let (regcfg, regtys) = reg::ssa_to_reg(&cfg, value_types);
-    println!("{}", regcfg);
 
     let func = FuncInfo {
         name: func.name.clone(),
@@ -629,7 +631,33 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             store_place(translator, res, dst);
             translator.create_value(Type::None)
         }
-        x => todo!("{:?}", expr),
+        Expr::Neg { value } => {
+            let src = load_place_expr(translator, value);
+            let TypeOrPlace::Type(ty) = translator.types[&src].clone() else {
+                unreachable!();
+            };
+
+            let dst = translator.create_value(ty.clone());
+            match ty {
+                Type::Int => {
+                    translator.push_ins(Instruction::INeg(Unop { src, dst }));
+                }
+                Type::Float => {
+                    translator.push_ins(Instruction::FNeg(Unop { src, dst }));
+                }
+                _ => unreachable!(),
+            }
+
+            dst
+        }
+        Expr::LogicalNot { value } => {
+            let src = load_place_expr(translator, value);
+            let src = convert_to(translator, src, Type::Bool);
+            let dst = translator.create_value(Type::Bool);
+            translator.push_ins(Instruction::BNot(Unop { src, dst }));
+            dst
+        }
+        x => todo!("{:?}", x),
     }
 }
 
