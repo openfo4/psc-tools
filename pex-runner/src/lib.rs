@@ -9,7 +9,7 @@ pub fn run(module: &Module, func: &str, inputs: HashMap<String, Value>) -> Value
         for state in &class.states {
             for f in &state.functions {
                 if module.strings.get(f.name).unwrap() == func {
-                    return call_func(module, &f.function, inputs);
+                    return call_func(module, &f.function, inputs.values().copied().collect());
                 }
             }
         }
@@ -18,15 +18,10 @@ pub fn run(module: &Module, func: &str, inputs: HashMap<String, Value>) -> Value
     todo!()
 }
 
-fn call_func(module: &Module, func: &Function, params: HashMap<String, Value>) -> Value {
+fn call_func(module: &Module, func: &Function, params: Vec<Value>) -> Value {
     let mut locals = HashMap::new();
-    for param in &func.params {
-        let name = module.strings.get(param.name).unwrap();
-
-        let value = params.values().next().unwrap();
-
-        // let value = params.get(name).unwrap();
-        locals.insert(param.name, *value);
+    for (param, value) in func.params.iter().zip(params) {
+        locals.insert(param.name, value);
     }
 
     let mut frame = Frame { pc: 0, locals };
@@ -142,6 +137,27 @@ fn call_func(module: &Module, func: &Function, params: HashMap<String, Value>) -
             Instruction::Store(op) => {
                 let src: Value = frame.load(op.src);
                 frame.store(op.dst, src);
+            }
+            Instruction::CallStatic(op) => {
+                let class = module.strings.get(op.class).unwrap();
+                let func = module.strings.get(op.function).unwrap();
+
+                let class = module
+                    .classes
+                    .iter()
+                    .find(|c| module.strings.get(c.name).unwrap() == class)
+                    .unwrap();
+                let func = class
+                    .states
+                    .iter()
+                    .flat_map(|state| state.functions.iter())
+                    .find(|f| module.strings.get(f.name).unwrap() == func)
+                    .unwrap();
+
+                let args = op.args.iter().map(|arg| frame.load(*arg)).collect();
+                let res = call_func(module, &func.function, args);
+
+                frame.store(op.return_assignment, res);
             }
             ins => todo!("{:?}", ins),
         }
