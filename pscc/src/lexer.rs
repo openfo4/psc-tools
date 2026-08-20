@@ -72,6 +72,8 @@ pub enum TokenKind<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal<'a> {
+    None,
+    Bool(bool),
     NumberInt(i32),
     NumberDecimal { integer: i32, fraction: i32 },
     String(Cow<'a, str>),
@@ -234,9 +236,21 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
 
         if cur_ident_start != cur_ident_end {
             debug_assert!(cur_ident_end > cur_ident_start);
+
+            let ident = &input[cur_ident_start..cur_ident_end];
+            let kind = if ident.eq_ignore_ascii_case("none") {
+                TokenKind::Literal(Literal::None)
+            } else if ident.eq_ignore_ascii_case("true") {
+                TokenKind::Literal(Literal::Bool(true))
+            } else if ident.eq_ignore_ascii_case("false") {
+                TokenKind::Literal(Literal::Bool(false))
+            } else {
+                TokenKind::Ident(ident)
+            };
+
             tokens.push(Token {
                 span: cur_ident_start..cur_ident_end,
-                kind: TokenKind::Ident(&input[cur_ident_start..cur_ident_end]),
+                kind,
             });
         }
 
@@ -255,9 +269,20 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
 
     if cur_ident_start != cur_ident_end {
         debug_assert!(cur_ident_end > cur_ident_start);
+        let ident = &input[cur_ident_start..cur_ident_end];
+        let kind = if ident.eq_ignore_ascii_case("none") {
+            TokenKind::Literal(Literal::None)
+        } else if ident.eq_ignore_ascii_case("true") {
+            TokenKind::Literal(Literal::Bool(true))
+        } else if ident.eq_ignore_ascii_case("false") {
+            TokenKind::Literal(Literal::Bool(false))
+        } else {
+            TokenKind::Ident(ident)
+        };
+
         tokens.push(Token {
             span: cur_ident_start..cur_ident_end,
-            kind: TokenKind::Ident(&input[cur_ident_start..cur_ident_end]),
+            kind,
         });
     }
 

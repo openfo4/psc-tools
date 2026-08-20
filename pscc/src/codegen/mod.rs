@@ -456,6 +456,8 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
     match expr {
         Expr::Literal(literal) => {
             let ty = match literal {
+                Literal::None => Type::None,
+                Literal::Bool(_) => Type::Bool,
                 Literal::NumberInt(_) => Type::Int,
                 Literal::NumberDecimal {
                     integer: _,

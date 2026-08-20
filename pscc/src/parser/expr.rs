@@ -140,6 +140,8 @@ impl ExprOrToken<'_> {
                 ident: ident.to_string(),
             },
             Self::Token(TokenKind::Literal(literal)) => match literal {
+                Literal::None => Expr::Literal(Literal::None),
+                Literal::Bool(v) => Expr::Literal(Literal::Bool(*v)),
                 Literal::NumberInt(lit) => Expr::Literal(Literal::NumberInt(*lit)),
                 Literal::NumberDecimal { integer, fraction } => {
                     Expr::Literal(Literal::NumberDecimal {

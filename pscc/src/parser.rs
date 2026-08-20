@@ -83,9 +83,9 @@ impl<'a> Parser<'a> {
                 TokenKind::Eol => {
                     self.consume();
                 }
-                TokenKind::Ident(_) => {
-                    // Standalone property
+                _ => {
                     match self.peek_after_type() {
+                        // Standalone property
                         Some(token) if token.keyword() == Some(Keyword::Property) => {
                             let prop = self.parse_property()?;
                             properties.push(prop);
@@ -101,12 +101,10 @@ impl<'a> Parser<'a> {
                         }
                         _ => {
                             let global = self.parse_define_stmt()?;
+                            dbg!(&global);
                             globals.push(global);
                         }
                     }
-                }
-                _ => {
-                    todo!()
                 }
             }
 
@@ -637,6 +635,8 @@ impl<'a> Parser<'a> {
                 ident: ident.to_string(),
             }),
             ParseToken::Token(TokenKind::Literal(literal)) => match literal {
+                Literal::None => Ok(Expr::Literal(Literal::None)),
+                Literal::Bool(v) => Ok(Expr::Literal(Literal::Bool(*v))),
                 Literal::NumberInt(lit) => Ok(Expr::Literal(Literal::NumberInt(*lit))),
                 Literal::NumberDecimal { integer, fraction } => {
                     Ok(Expr::Literal(Literal::NumberDecimal {
@@ -711,6 +711,9 @@ impl<'a> Parser<'a> {
 
         match token.kind {
             TokenKind::Ident(id) => Ok(id),
+            // "none" can be both a type or a value depending on
+            // the context. Fun times.
+            TokenKind::Literal(Literal::None) => Ok("none"),
             _ => Err(Error {
                 span: token.span.clone(),
                 kind: ErrorKind::UnexpectedToken {
