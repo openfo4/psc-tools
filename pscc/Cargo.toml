@@ -12,6 +12,7 @@ thiserror = "2.0.19"
 
 [dev-dependencies]
 pex-runner = { version = "0.1.0", path = "../pex-runner" }
+bstr = { version = "1.13.1", default-features = false, features = ["alloc"] }
 
 [[test]]
 name = "ui"

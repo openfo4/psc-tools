@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use bstr::BString;
 use pex::{Module, Value};
+use pex_runner::Runner;
 
 fn main() {
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("ui");
@@ -37,22 +40,43 @@ fn main() {
             std::process::exit(1);
         }
 
-        for cmd in cmds {
-            match cmd {
+        if cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
                 Command::Run {
-                    params,
-                    func,
-                    result,
-                } => {
-                    let pex = out_dir
-                        .join(path.file_name().unwrap())
-                        .with_extension("pex");
+                    params: _,
+                    result: _,
+                    func: _
+                }
+            )
+        }) {
+            let mut opts = RunOptions {
+                out_dir: out_dir.clone(),
+                name: path.file_name().unwrap().to_owned(),
+                imports: Vec::new(),
+            };
 
-                    if let Err(err) = run_pex(pex, &func, params, result) {
-                        eprintln!("test failed: {}", path.to_string_lossy());
-                        eprintln!("{}", err);
-                        std::process::exit(1);
+            for cmd in &cmds {
+                match cmd {
+                    Command::Import { path } => {
+                        opts.imports.push(path.clone());
                     }
+                    _ => {}
+                }
+            }
+
+            let runner = RunnerState::new(&opts).unwrap();
+
+            for cmd in cmds {
+                match cmd {
+                    Command::Run {
+                        params,
+                        result,
+                        func,
+                    } => {
+                        runner.call(&func, params, result).unwrap();
+                    }
+                    _ => {}
                 }
             }
         }
@@ -70,6 +94,12 @@ fn parse_command(cmd: &str, offset: usize, file: &str) -> Command {
         };
     }
 
+    if let Some(s) = cmd.strip_prefix("import:") {
+        return Command::Import {
+            path: s.trim().to_owned(),
+        };
+    }
+
     todo!("unknown command: {}", cmd);
 }
 
@@ -78,6 +108,9 @@ enum Command {
         params: HashMap<String, Value>,
         result: Value,
         func: String,
+    },
+    Import {
+        path: String,
     },
 }
 
@@ -129,37 +162,81 @@ fn extract_function_name(file: &str) -> &str {
     &name[..end]
 }
 
-fn run_pex<P>(
-    pex: P,
-    func: &str,
-    params: HashMap<String, Value>,
-    expect: Value,
-) -> Result<(), String>
-where
-    P: AsRef<Path>,
-{
-    let data = std::fs::read(&pex).map_err(|err| {
-        format!(
-            "could not read .pex file from {}: {}",
-            pex.as_ref().to_string_lossy(),
-            err,
-        )
-    })?;
-    let module = Module::read(&data).map_err(|err| {
-        format!(
-            "could not parse pex module from file {}: {}",
-            pex.as_ref().to_string_lossy(),
-            err,
-        )
-    })?;
+struct RunOptions {
+    /// Directory where all `.pex` files are placed.
+    out_dir: PathBuf,
+    /// The name of the file.
+    name: OsString,
+    imports: Vec<String>,
+}
 
-    let result = pex_runner::run(&module, func, params);
+struct RunnerState {
+    runner: Runner,
+    class: BString,
+}
 
-    if result != expect {
-        return Err(format!(
-            "test for {func} failed: expected {expect:?} to be returned, got {result:?}"
-        ));
+impl RunnerState {
+    fn new(opts: &RunOptions) -> Result<Self, String> {
+        let mut paths = vec![opts.out_dir.join(&opts.name).with_extension("pex")];
+        for name in &opts.imports {
+            let path = opts.out_dir.join(name).with_extension("pex");
+            paths.push(path);
+        }
+
+        let mut class = None;
+
+        let mut runner = Runner::new();
+        for (index, path) in paths.iter().enumerate() {
+            let data = std::fs::read(&path).map_err(|err| {
+                format!(
+                    "could not read .pex file from {}: {}",
+                    path.to_string_lossy(),
+                    err,
+                )
+            })?;
+
+            let module = Module::read(&data).map_err(|err| {
+                format!(
+                    "could not parse pex module from file {}: {}",
+                    path.to_string_lossy(),
+                    err,
+                )
+            })?;
+
+            if index == 0 {
+                class = module
+                    .classes
+                    .iter()
+                    .next()
+                    .map(|class| module.strings.get(class.name).unwrap().to_owned());
+            }
+
+            runner.register(module);
+        }
+
+        let class = class.unwrap();
+
+        Ok(Self { runner, class })
     }
 
-    Ok(())
+    fn call(
+        &self,
+        func: &str,
+        params: HashMap<String, Value>,
+        expect: Value,
+    ) -> Result<(), String> {
+        let result = self.runner.call(
+            self.class.as_ref(),
+            func.into(),
+            params.into_values().collect(),
+        );
+
+        if result != expect {
+            return Err(format!(
+                "test for {func} failed: expected {expect:?} to be returned, got {result:?}"
+            ));
+        }
+
+        Ok(())
+    }
 }

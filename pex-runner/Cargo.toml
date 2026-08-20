@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 pex = { version = "0.1.0", path = "../pex" }
+
+bstr = { version = "1.13.1", default-features = false, features = ["alloc"] }
