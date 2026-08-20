@@ -3,7 +3,7 @@ use crate::lexer::Literal;
 #[derive(Clone, Debug)]
 pub struct Ast {
     pub script_name: String,
-    pub extends: String,
+    pub extends: Option<String>,
     pub property_groups: Vec<PropertyGroup>,
     pub functions: Vec<Function>,
     pub properties: Vec<Property>,

@@ -24,6 +24,8 @@ struct Args {
     input: PathBuf,
     #[arg(short, long)]
     import: Vec<PathBuf>,
+    #[arg(long, default_value = ".")]
+    out_dir: PathBuf,
 }
 
 fn main() -> ExitCode {
@@ -34,7 +36,7 @@ fn main() -> ExitCode {
     let config = Config::default();
 
     let mut files = args.import;
-    files.push(args.input);
+    files.push(args.input.clone());
 
     let mut data = Vec::new();
     for path in &files {
@@ -88,9 +90,16 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     };
 
+    let filename = args.input.file_name().unwrap();
+
     let module = compile_module(&ast);
     let bytes = module.write();
-    std::fs::write("a.pex", bytes).unwrap();
+
+    std::fs::create_dir_all(&args.out_dir).unwrap();
+    let mut dst = args.out_dir.join(filename);
+    dst.set_extension("pex");
+
+    std::fs::write(dst, bytes).unwrap();
 
     ExitCode::SUCCESS
 }
@@ -127,7 +136,7 @@ fn compile_module(ast: &Ast) -> pex::Module {
 
     let classes = vec![Class {
         name: strings.insert(&ast.script_name),
-        parent: strings.insert(&ast.extends),
+        parent: strings.insert(ast.extends.as_ref().map(|v| v.as_str()).unwrap_or("none")),
         docstring: strings.insert(""),
         is_const: false,
         user_flags: 0,

@@ -49,6 +49,10 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<Ast, Error<'a>> {
+        while self.peek().is_some_and(|tok| tok.kind == TokenKind::Eol) {
+            self.consume();
+        }
+
         let header = self.parse_header()?;
 
         let mut property_groups = Vec::new();
@@ -156,8 +160,14 @@ impl<'a> Parser<'a> {
         self.consume_next(&[ParseToken::Keyword(Keyword::ScriptName)])?;
         let name = self.consume_ident()?;
 
-        self.consume_next(&[ParseToken::Keyword(Keyword::Extends)])?;
-        let parent = self.consume_ident()?;
+        let mut parent = None;
+        if self
+            .peek()
+            .is_some_and(|tok| tok.keyword() == Some(Keyword::Extends))
+        {
+            self.consume_next(&[ParseToken::Keyword(Keyword::Extends)])?;
+            parent = Some(self.consume_ident()?.to_owned());
+        }
 
         while self
             .peek()
@@ -181,7 +191,7 @@ impl<'a> Parser<'a> {
 
         Ok(Header {
             script_name: name.to_owned(),
-            extends: parent.to_owned(),
+            extends: parent,
         })
     }
 
@@ -910,7 +920,7 @@ enum ExprOrType {
 #[derive(Clone, Debug)]
 struct Header {
     script_name: String,
-    extends: String,
+    extends: Option<String>,
 }
 
 #[cfg(test)]
