@@ -292,6 +292,15 @@ pub fn lower_function(
         lower_stmt(&mut translator, stmt);
     }
 
+    // Make sure the last instruction is a return.
+    // The value we return will always be none, for all other types an
+    // explicit return is always required.
+    if translator.cur_block.is_some() {
+        let value = translator.create_value(Type::None);
+        translator.push_ins(Instruction::Literal(Literal::None, value));
+        translator.push_ins(Instruction::Return(value));
+    }
+
     let mut blocks = HashMap::new();
     for (id, mut instructions) in translator.blocks {
         for ins in &mut instructions {

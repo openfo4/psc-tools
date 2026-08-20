@@ -67,6 +67,7 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                 Instruction::Literal(lit, dst) => {
                     pexins::Instruction::Store(pex::instruction::Unop {
                         src: match lit {
+                            Literal::None => Value::Null,
                             Literal::NumberInt(value) => Value::Int(*value),
                             _ => todo!(),
                         },
