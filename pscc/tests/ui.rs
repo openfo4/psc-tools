@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use bstr::BString;
+use colored::Colorize;
 use pex::{Module, Value};
 use pex_runner::Runner;
 
@@ -80,6 +81,9 @@ fn main() {
                 }
             }
         }
+
+        let testname = path.strip_prefix("tests/psc").unwrap();
+        println!("test {} ... {}", testname.to_string_lossy(), "ok".green());
     }
 }
 
