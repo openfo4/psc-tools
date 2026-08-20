@@ -143,6 +143,10 @@ fn parse_inputs(s: &str) -> (HashMap<String, Value>, Value) {
 
     let mut params = HashMap::new();
     for param in s[..mid].split(",") {
+        if param.trim().is_empty() {
+            continue;
+        }
+
         let (name, value) = param.split_once("=").unwrap();
         let name = name.trim().to_owned();
         let value: i32 = value.trim().parse().unwrap();

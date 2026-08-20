@@ -1,27 +1,43 @@
 use std::collections::HashMap;
 
-use bstr::BStr;
+use bstr::{BStr, BString};
 use pex::instruction::Instruction;
 use pex::{Function, Module, StringKey, StringTable, Value};
 
 #[derive(Clone, Debug)]
 pub struct Runner {
     modules: Vec<Module>,
+    /// (Class, Property) => Property
+    properties: HashMap<(BString, BString), Property>,
 }
 
 impl Runner {
     pub fn new() -> Self {
         Self {
             modules: Vec::new(),
+            properties: HashMap::new(),
         }
     }
 
     pub fn register(&mut self, module: Module) {
+        for class in &module.classes {
+            for prop in &class.properties {
+                if let Some(var) = prop.autovar_name {
+                    let class = module.strings.get(class.name).unwrap();
+                    let prop = module.strings.get(prop.name).unwrap();
+
+                    self.properties
+                        .insert((class.to_owned(), prop.to_owned()), Property::Auto(var));
+                }
+            }
+        }
+
         self.modules.push(module);
     }
 
     pub fn call(&self, class: &BStr, func: &BStr, params: Vec<Value>) -> Value {
         let (module, class, func) = self.get_func(class.into(), func.into());
+
         self.call_in(module, func, class.name, params)
     }
 
@@ -57,6 +73,16 @@ impl Runner {
 
         for local in &func.locals {
             local_types.insert(local.name, local.ty);
+            locals.insert(local.name, Value::Null);
+        }
+
+        let mut globals = HashMap::new();
+        let mut global_types = HashMap::new();
+        for class in &module.classes {
+            for var in &class.variables {
+                globals.insert(var.def.name, var.value);
+                global_types.insert(var.def.name, var.def.ty);
+            }
         }
 
         let mut frame = Frame {
@@ -64,6 +90,8 @@ impl Runner {
             locals,
             local_types,
             self_ty,
+            global_types,
+            globals,
         };
 
         loop {
@@ -199,6 +227,36 @@ impl Runner {
 
                     frame.store(op.return_assignment, res);
                 }
+                Instruction::PropertyGet(op) => {
+                    let class = frame.ty(op.value, &module.strings);
+                    let property = module.strings.get(op.property).unwrap();
+                    let prop = self
+                        .properties
+                        .get(&(class.into(), property.into()))
+                        .unwrap();
+
+                    let value = match prop {
+                        Property::Auto(var) => frame.globals.get(var).unwrap(),
+                    };
+
+                    frame.store(op.return_assignment, *value);
+                }
+                Instruction::PropertySet(op) => {
+                    let class = frame.ty(op.object, &module.strings);
+                    let property = module.strings.get(op.property).unwrap();
+                    let prop = self
+                        .properties
+                        .get(&(class.into(), property.into()))
+                        .unwrap();
+
+                    let value = frame.load(op.value);
+
+                    match prop {
+                        Property::Auto(var) => {
+                            frame.store(Value::Ident(*var), value);
+                        }
+                    }
+                }
                 ins => todo!("{:?}", ins),
             }
 
@@ -213,6 +271,8 @@ struct Frame {
     locals: HashMap<StringKey, Value>,
     local_types: HashMap<StringKey, StringKey>,
     self_ty: StringKey,
+    globals: HashMap<StringKey, Value>,
+    global_types: HashMap<StringKey, StringKey>,
 }
 
 impl Frame {
@@ -220,10 +280,12 @@ impl Frame {
     where
         T: ExtractValue,
     {
-        if let Value::Ident(name) = value
-            && let Some(v) = self.locals.get(&name)
-        {
-            value = *v;
+        if let Value::Ident(name) = value {
+            if let Some(v) = self.locals.get(&name) {
+                value = *v
+            } else if let Some(v) = self.globals.get(&name) {
+                value = *v
+            }
         }
 
         T::extract(&value)
@@ -232,7 +294,11 @@ impl Frame {
     fn store(&mut self, dst: Value, value: Value) {
         match dst {
             Value::Ident(dst) => {
-                self.locals.insert(dst, value);
+                if self.locals.contains_key(&dst) {
+                    self.locals.insert(dst, value);
+                } else if self.globals.contains_key(&dst) {
+                    self.globals.insert(dst, value);
+                }
             }
             _ => todo!(),
         }
@@ -251,8 +317,17 @@ impl Frame {
                     return strings.get(self.self_ty).unwrap().try_into().unwrap();
                 }
 
-                let ty = self.local_types.get(&ident).unwrap();
-                strings.get(*ty).unwrap().try_into().unwrap()
+                if let Some(ty) = self.local_types.get(&ident) {
+                    let ty = strings.get(*ty).unwrap().try_into().unwrap();
+                    return ty;
+                }
+
+                if let Some(ty) = self.global_types.get(&ident) {
+                    let ty = strings.get(*ty).unwrap().try_into().unwrap();
+                    return ty;
+                }
+
+                todo!()
             }
         }
     }
@@ -284,4 +359,9 @@ impl ExtractValue for bool {
             _ => todo!(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+enum Property {
+    Auto(StringKey),
 }

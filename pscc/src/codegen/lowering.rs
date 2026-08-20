@@ -6,7 +6,7 @@ use crate::codegen::ssa::BlockId;
 use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction, PropertyRef};
 use crate::lexer::Literal;
 
-use pex::instruction::{CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet};
+use pex::instruction::{CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet, PropertySet};
 use pex::{Value, VariableDefinition, instruction as pexins};
 
 pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Function {
@@ -208,7 +208,21 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                         })
                     }
                 },
-                _ => continue,
+                Instruction::SetProperty(prop, src) => match prop {
+                    PropertyRef::Local(name) => pexins::Instruction::PropertySet(PropertySet {
+                        property: strings.insert(name),
+                        object: Value::Ident(strings.insert("self")),
+                        value: Value::Ident(reg_names[src]),
+                    }),
+                    PropertyRef::Other(object, name) => {
+                        pexins::Instruction::PropertySet(PropertySet {
+                            property: strings.insert(name),
+                            object: Value::Ident(strings.insert(&object.to_string())),
+                            value: Value::Ident(reg_names[src]),
+                        })
+                    }
+                },
+                x => todo!("{:?}", x),
             };
             instructions.push(out);
         }

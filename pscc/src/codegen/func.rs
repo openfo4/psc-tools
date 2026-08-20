@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter};
 
 use crate::codegen::ssa::{BlockId, Value};
-use crate::codegen::{Callee, Instruction};
+use crate::codegen::{Callee, Instruction, PropertyRef};
 
 #[derive(Clone, Debug)]
 pub struct ControlFlowGraph<T> {
@@ -217,6 +217,9 @@ where
                     Instruction::GetProperty(prop, dst) => {
                         writeln!(f, "{} = get_property {:?}", dst, prop)?;
                     }
+                    Instruction::SetProperty(prop, src) => {
+                        writeln!(f, "set_property {:?} {}", prop, src)?;
+                    }
                 }
             }
         }
@@ -315,8 +318,19 @@ impl DataFlowGraph {
                         uses.entry(op.src).or_default().push(loc);
                         defs.insert(op.dst, loc);
                     }
-                    Instruction::GetProperty(_, dst) => {
+                    Instruction::GetProperty(object, dst) => {
+                        if let PropertyRef::Other(object, _) = object {
+                            uses.entry(*object).or_default().push(loc);
+                        }
+
                         defs.insert(*dst, loc);
+                    }
+                    Instruction::SetProperty(object, src) => {
+                        if let PropertyRef::Other(object, _) = object {
+                            uses.entry(*object).or_default().push(loc);
+                        }
+
+                        uses.entry(*src).or_default().push(loc);
                     }
                 }
             }

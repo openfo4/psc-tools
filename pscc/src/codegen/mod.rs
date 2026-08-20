@@ -46,6 +46,7 @@ pub enum Instruction<T> {
     Cast(Cast<T>),
     StringConcat(Binop<T>),
     GetProperty(PropertyRef<T>, T),
+    SetProperty(PropertyRef<T>, T),
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +341,7 @@ pub fn lower_function(
     }
 
     let (regcfg, regtys) = reg::ssa_to_reg(&cfg, value_types);
+    println!("{}", regcfg);
 
     let func = FuncInfo {
         name: func.name.clone(),
@@ -693,10 +695,31 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                         translator.push_ins(Instruction::StoreGlobal(global.name.clone(), value));
                         return;
                     }
+
+                    if let Some(prop) = translator
+                        .ast
+                        .properties
+                        .iter()
+                        .chain(
+                            translator
+                                .ast
+                                .property_groups
+                                .iter()
+                                .flat_map(|g| &g.properties),
+                        )
+                        .find(|v| &v.name == item)
+                    {
+                        let value = convert_to(translator, value, prop.ty.clone());
+                        translator.push_ins(Instruction::SetProperty(
+                            PropertyRef::Local(prop.name.clone()),
+                            value,
+                        ));
+                        return;
+                    }
+
+                    todo!();
                 }
             }
-
-            return;
         }
         TypeOrPlace::Type(_) => {}
     }

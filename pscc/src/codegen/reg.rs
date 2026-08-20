@@ -168,6 +168,15 @@ pub fn ssa_to_reg(
                         regs.alloc(*dst),
                     ),
                 },
+                Instruction::SetProperty(prop, src) => match prop {
+                    PropertyRef::Local(prop) => {
+                        Instruction::SetProperty(PropertyRef::Local(prop.clone()), regs.get(*src))
+                    }
+                    PropertyRef::Other(object, prop) => Instruction::SetProperty(
+                        PropertyRef::Other(regs.get(*object), prop.clone()),
+                        regs.get(*src),
+                    ),
+                },
                 x => todo!("{:?}", x),
             };
 
@@ -222,6 +231,8 @@ impl RegisterPool {
     }
 
     fn alloc(&mut self, value: Value) -> Register {
+        debug_assert!(!self.registers.contains_key(&value));
+
         let ty = &self.value_types[&value];
         if let Some(regs) = self.retired.get_mut(ty)
             && let Some(reg) = regs.pop()
@@ -354,6 +365,13 @@ where
             PropertyRef::Local(_) => {}
             PropertyRef::Other(value, _) => f(*value),
         },
+        Instruction::SetProperty(prop, src) => {
+            f(*src);
+            match prop {
+                PropertyRef::Local(_) => {}
+                PropertyRef::Other(value, _) => f(*value),
+            }
+        }
         x => todo!("{:?}", x),
     }
 }
