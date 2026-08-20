@@ -1,3 +1,4 @@
+mod condition;
 mod func;
 mod lowering;
 mod reg;
@@ -9,6 +10,7 @@ use std::debug_assert_matches;
 use pex::VariableDefinition;
 
 use crate::ast::{Ast, Expr, Function, Statement, Type};
+use crate::codegen::condition::lower_condition_expr;
 use crate::codegen::func::{Block, ControlFlowGraph};
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::{BlockId, SsaBuilder, Value, Var};
@@ -384,15 +386,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
             for block in then_blocks {
                 let then_block = translator.create_block();
 
-                let condition = lower_expr(translator, &block.condition);
-                translator.push_ins(Instruction::Brif(
-                    condition,
-                    then_block,
-                    Vec::new(),
-                    next_block,
-                    Vec::new(),
-                ));
-                translator.ssa.branch(&[then_block, next_block]);
+                lower_condition_expr(translator, &block.condition, then_block, next_block);
 
                 translator.ssa.seal(then_block);
                 translator.switch_to_block(then_block);
@@ -431,15 +425,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
             translator.ssa.branch(&[cond_block]);
 
             translator.switch_to_block(cond_block);
-            let condition = load_place_expr(translator, condition);
-            translator.push_ins(Instruction::Brif(
-                condition,
-                body_block,
-                Vec::new(),
-                merge_block,
-                Vec::new(),
-            ));
-            translator.ssa.branch(&[body_block, merge_block]);
+            lower_condition_expr(translator, condition, body_block, merge_block);
 
             translator.ssa.seal(body_block);
             translator.switch_to_block(body_block);
@@ -656,6 +642,10 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             let dst = translator.create_value(Type::Bool);
             translator.push_ins(Instruction::BNot(Unop { src, dst }));
             dst
+        }
+        // Only allowed in condition expressions.
+        Expr::LogicalAnd { lhs: _, rhs: _ } | Expr::LogicalOr { lhs: _, rhs: _ } => {
+            unreachable!()
         }
         x => todo!("{:?}", x),
     }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -109,7 +108,7 @@ fn parse_command(cmd: &str, offset: usize, file: &str) -> Command {
 
 enum Command {
     Run {
-        params: HashMap<String, Value>,
+        params: Vec<(String, Value)>,
         result: Value,
         func: String,
     },
@@ -138,10 +137,10 @@ fn enumerate_dir(path: impl AsRef<Path>) -> Vec<PathBuf> {
     files
 }
 
-fn parse_inputs(s: &str) -> (HashMap<String, Value>, Value) {
+fn parse_inputs(s: &str) -> (Vec<(String, Value)>, Value) {
     let mid = s.find("=>").unwrap();
 
-    let mut params = HashMap::new();
+    let mut params = Vec::new();
     for param in s[..mid].split(",") {
         if param.trim().is_empty() {
             continue;
@@ -150,7 +149,7 @@ fn parse_inputs(s: &str) -> (HashMap<String, Value>, Value) {
         let (name, value) = param.split_once("=").unwrap();
         let name = name.trim().to_owned();
         let value: i32 = value.trim().parse().unwrap();
-        params.insert(name, Value::Int(value));
+        params.push((name, Value::Int(value)));
     }
 
     let result: i32 = s[mid + "=>".len()..].trim().parse().unwrap();
@@ -227,16 +226,11 @@ impl RunnerState {
         Ok(Self { runner, class })
     }
 
-    fn call(
-        &self,
-        func: &str,
-        params: HashMap<String, Value>,
-        expect: Value,
-    ) -> Result<(), String> {
+    fn call(&self, func: &str, params: Vec<(String, Value)>, expect: Value) -> Result<(), String> {
         let result = self.runner.call(
             self.class.as_ref(),
             func.into(),
-            params.into_values().collect(),
+            params.iter().map(|v| v.1).collect(),
         );
 
         if result != expect {

@@ -139,7 +139,23 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                             offset: 0,
                         })
                     } else {
-                        todo!();
+                        branches.push(BranchReloc {
+                            block: id,
+                            instruction: instructions.len(),
+                            target: *then_block,
+                        });
+                        instructions.push(pexins::Instruction::JumpIfTrue(ConditionalJump {
+                            condition,
+                            offset: 0,
+                        }));
+
+                        branches.push(BranchReloc {
+                            block: id,
+                            instruction: instructions.len(),
+                            target: *else_block,
+                        });
+
+                        pexins::Instruction::Jump(Jump { offset: 0 })
                     }
                 }
                 Instruction::Jmp(block, args) => {

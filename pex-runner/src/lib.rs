@@ -38,7 +38,7 @@ impl Runner {
     pub fn call(&self, class: &BStr, func: &BStr, params: Vec<Value>) -> Value {
         let (module, class, func) = self.get_func(class.into(), func.into());
 
-        self.call_in(module, func, class.name, params)
+        self.call_in(module, func, class.name, params, &mut HashMap::new())
     }
 
     fn get_func(&self, class: &BStr, func: &BStr) -> (&pex::Module, &pex::Class, &pex::Function) {
@@ -63,6 +63,7 @@ impl Runner {
         func: &Function,
         self_ty: StringKey,
         params: Vec<Value>,
+        globals: &mut HashMap<StringKey, Value>,
     ) -> Value {
         let mut locals = HashMap::new();
         let mut local_types = HashMap::new();
@@ -76,11 +77,13 @@ impl Runner {
             locals.insert(local.name, Value::Null);
         }
 
-        let mut globals = HashMap::new();
         let mut global_types = HashMap::new();
         for class in &module.classes {
             for var in &class.variables {
-                globals.insert(var.def.name, var.value);
+                if !globals.contains_key(&var.def.name) {
+                    globals.insert(var.def.name, var.value);
+                }
+
                 global_types.insert(var.def.name, var.def.ty);
             }
         }
@@ -91,7 +94,7 @@ impl Runner {
             local_types,
             self_ty,
             global_types,
-            globals,
+            globals: globals.clone(),
         };
 
         loop {
@@ -201,7 +204,11 @@ impl Runner {
                         continue;
                     }
                 }
-                Instruction::Return(value) => return frame.load(*value),
+                Instruction::Return(value) => {
+                    let value = frame.load(*value);
+                    *globals = frame.globals;
+                    return value;
+                }
                 Instruction::Store(op) => {
                     let src: Value = frame.load(op.src);
                     frame.store(op.dst, src);
@@ -212,7 +219,7 @@ impl Runner {
                     let (module, class, func) = self.get_func(class, func);
 
                     let args = op.args.iter().map(|arg| frame.load(*arg)).collect();
-                    let res = self.call_in(module, func, class.name, args);
+                    let res = self.call_in(module, func, class.name, args, &mut frame.globals);
 
                     frame.store(op.return_assignment, res);
                 }
@@ -223,7 +230,7 @@ impl Runner {
                     let (module, class, func) = self.get_func(class.into(), func);
 
                     let args = op.args.iter().map(|arg| frame.load(*arg)).collect();
-                    let res = self.call_in(module, func, class.name, args);
+                    let res = self.call_in(module, func, class.name, args, &mut frame.globals);
 
                     frame.store(op.return_assignment, res);
                 }
