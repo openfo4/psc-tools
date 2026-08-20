@@ -38,6 +38,13 @@ pub enum Error {
     },
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // FIXME: Implement this for real.
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Endianess {
     Little,
