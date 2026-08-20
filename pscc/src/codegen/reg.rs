@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::ast::Type;
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
-use crate::codegen::{Binop, Call, Callee, Cast, Instruction, Param, Unop};
+use crate::codegen::{Binop, Call, Callee, Cast, Instruction, Param, PropertyRef, Unop};
 
 pub fn ssa_to_reg(
     cfg: &ControlFlowGraph<Value>,
@@ -159,7 +159,15 @@ pub fn ssa_to_reg(
                 Instruction::StoreGlobal(global, src) => {
                     Instruction::StoreGlobal(global.clone(), regs.get(*src))
                 }
-
+                Instruction::GetProperty(prop, dst) => match prop {
+                    PropertyRef::Local(prop) => {
+                        Instruction::GetProperty(PropertyRef::Local(prop.clone()), regs.alloc(*dst))
+                    }
+                    PropertyRef::Other(object, prop) => Instruction::GetProperty(
+                        PropertyRef::Other(regs.get(*object), prop.clone()),
+                        regs.alloc(*dst),
+                    ),
+                },
                 x => todo!("{:?}", x),
             };
 
@@ -342,6 +350,10 @@ where
         Instruction::StoreGlobal(_, src) => {
             f(*src);
         }
+        Instruction::GetProperty(prop, _) => match prop {
+            PropertyRef::Local(_) => {}
+            PropertyRef::Other(value, _) => f(*value),
+        },
         x => todo!("{:?}", x),
     }
 }

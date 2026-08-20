@@ -144,6 +144,23 @@ fn compile_module(ast: &Ast) -> pex::Module {
         });
     }
 
+    let mut properties = Vec::new();
+    let mut globals = Vec::new();
+    for prop in ast.properties.iter().chain(
+        ast.property_groups
+            .iter()
+            .flat_map(|group| &group.properties),
+    ) {
+        let (prop, glob) = codegen::lower_property(prop, &mut strings);
+        properties.push(prop);
+        globals.push(glob);
+    }
+
+    for glob in &ast.globals {
+        let glob = codegen::lower_global(glob, &mut strings);
+        globals.push(glob);
+    }
+
     let classes = vec![Class {
         name: strings.insert(&ast.script_name),
         parent: strings.insert(ast.extends.as_ref().map(|v| v.as_str()).unwrap_or("none")),
@@ -152,8 +169,8 @@ fn compile_module(ast: &Ast) -> pex::Module {
         user_flags: 0,
         auto_state_name: strings.insert(""),
         structs: Vec::new(),
-        variables: Vec::new(),
-        properties: Vec::new(),
+        variables: globals,
+        properties,
         states: vec![State {
             name: strings.insert(""),
             functions,

@@ -8,12 +8,12 @@ use std::debug_assert_matches;
 
 use pex::VariableDefinition;
 
-use crate::StringBuilder;
 use crate::ast::{Ast, Expr, Function, Statement, Type};
 use crate::codegen::func::{Block, ControlFlowGraph};
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::{BlockId, SsaBuilder, Value, Var};
 use crate::lexer::Literal;
+use crate::{StringBuilder, ast};
 
 #[derive(Clone, Debug)]
 pub enum Instruction<T> {
@@ -443,7 +443,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
         }
         Statement::Return(expr) => {
             let value = match expr {
-                Some(expr) => lower_expr(translator, expr),
+                Some(expr) => load_place_expr(translator, expr),
                 None => translator.ssa.create_value(),
             };
             translator.push_ins(Instruction::Return(value));
@@ -849,5 +849,91 @@ fn lower_native_function(
         params,
         locals: Vec::new(),
         instructions: Vec::new(),
+    }
+}
+
+pub fn lower_property(
+    prop: &ast::Property,
+    strings: &mut StringBuilder,
+) -> (pex::Property, pex::Variable) {
+    if prop.is_auto {
+        // Unlike function locals, globals and properties must be preserved
+        // across script versions. This means a new version of the script
+        // may be used with data from an older version.
+        // We must ensure that the mangling scheme is consistent.
+        // This current scheme is the same as used by the offical papyrus
+        // compiler in FO4.
+        let global = format!("::{}", prop.name);
+
+        let value = match &prop.value {
+            Some(expr) => eval_constant_expr(expr, strings),
+            None => match prop.ty {
+                Type::None => pex::Value::Null,
+                Type::Bool => pex::Value::Bool(false),
+                Type::Int => pex::Value::Int(0),
+                Type::Float => pex::Value::Float(0.0),
+                Type::String => pex::Value::String(strings.insert("")),
+                _ => pex::Value::Null,
+            },
+        };
+
+        return (
+            pex::Property {
+                name: strings.insert(&prop.name),
+                ty: strings.insert(&prop.ty.to_string()),
+                docstring: strings.insert(""),
+                user_flags: 0,
+                autovar_name: Some(strings.insert(&global)),
+                getter: None,
+                setter: None,
+            },
+            pex::Variable {
+                def: VariableDefinition {
+                    name: strings.insert(&global),
+                    ty: strings.insert(&prop.ty.to_string()),
+                },
+                user_flags: 0,
+                value,
+            },
+        );
+    }
+
+    todo!()
+}
+
+pub fn lower_global(global: &ast::Define, strings: &mut StringBuilder) -> pex::Variable {
+    let value = match &global.value {
+        Some(expr) => eval_constant_expr(expr, strings),
+        None => match global.ty {
+            Type::None => pex::Value::Null,
+            Type::Bool => pex::Value::Bool(false),
+            Type::Int => pex::Value::Int(0),
+            Type::Float => pex::Value::Float(0.0),
+            Type::String => pex::Value::String(strings.insert("")),
+            _ => pex::Value::Null,
+        },
+    };
+
+    pex::Variable {
+        def: VariableDefinition {
+            name: strings.insert(&global.name),
+            ty: strings.insert(&global.ty.to_string()),
+        },
+        user_flags: 0,
+        value,
+    }
+}
+
+fn eval_constant_expr(expr: &Expr, strings: &mut StringBuilder) -> pex::Value {
+    match expr {
+        Expr::Literal(Literal::None) => pex::Value::Null,
+        Expr::Literal(Literal::Bool(v)) => pex::Value::Bool(*v),
+        Expr::Literal(Literal::NumberInt(v)) => pex::Value::Int(*v),
+        Expr::Literal(Literal::NumberDecimal { integer, fraction }) => {
+            // todo!()
+            pex::Value::Float(0.0)
+        }
+        Expr::Literal(Literal::String(v)) => pex::Value::String(strings.insert(v)),
+        _ => todo!(),
     }
 }
