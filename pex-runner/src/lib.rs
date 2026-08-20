@@ -1,15 +1,19 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 use pex::instruction::Instruction;
-use pex::{Function, Module, StringKey, Value};
+use pex::{Function, Module, StringKey, StringTable, Value};
 
 pub fn run(module: &Module, func: &str, inputs: HashMap<String, Value>) -> Value {
     for class in &module.classes {
         for state in &class.states {
             for f in &state.functions {
                 if module.strings.get(f.name).unwrap() == func {
-                    return call_func(module, &f.function, inputs.values().copied().collect());
+                    return call_func(
+                        module,
+                        &f.function,
+                        class.name,
+                        inputs.values().copied().collect(),
+                    );
                 }
             }
         }
@@ -18,13 +22,24 @@ pub fn run(module: &Module, func: &str, inputs: HashMap<String, Value>) -> Value
     todo!()
 }
 
-fn call_func(module: &Module, func: &Function, params: Vec<Value>) -> Value {
+fn call_func(module: &Module, func: &Function, self_ty: StringKey, params: Vec<Value>) -> Value {
     let mut locals = HashMap::new();
+    let mut local_types = HashMap::new();
     for (param, value) in func.params.iter().zip(params) {
         locals.insert(param.name, value);
+        local_types.insert(param.name, param.ty);
     }
 
-    let mut frame = Frame { pc: 0, locals };
+    for local in &func.locals {
+        local_types.insert(local.name, local.ty);
+    }
+
+    let mut frame = Frame {
+        pc: 0,
+        locals,
+        local_types,
+        self_ty,
+    };
 
     loop {
         match &func.instructions[frame.pc] {
@@ -155,7 +170,29 @@ fn call_func(module: &Module, func: &Function, params: Vec<Value>) -> Value {
                     .unwrap();
 
                 let args = op.args.iter().map(|arg| frame.load(*arg)).collect();
-                let res = call_func(module, &func.function, args);
+                let res = call_func(module, &func.function, class.name, args);
+
+                frame.store(op.return_assignment, res);
+            }
+            Instruction::CallMethod(op) => {
+                let object: Value = frame.load(op.object);
+                let class = frame.ty(object, &module.strings);
+                let func = module.strings.get(op.function_name).unwrap();
+
+                let class = module
+                    .classes
+                    .iter()
+                    .find(|c| module.strings.get(c.name).unwrap() == class)
+                    .unwrap();
+                let func = class
+                    .states
+                    .iter()
+                    .flat_map(|state| state.functions.iter())
+                    .find(|f| module.strings.get(f.name).unwrap() == func)
+                    .unwrap();
+
+                let args = op.args.iter().map(|arg| frame.load(*arg)).collect();
+                let res = call_func(module, &func.function, class.name, args);
 
                 frame.store(op.return_assignment, res);
             }
@@ -170,6 +207,8 @@ fn call_func(module: &Module, func: &Function, params: Vec<Value>) -> Value {
 struct Frame {
     pc: usize,
     locals: HashMap<StringKey, Value>,
+    local_types: HashMap<StringKey, StringKey>,
+    self_ty: StringKey,
 }
 
 impl Frame {
@@ -177,8 +216,10 @@ impl Frame {
     where
         T: ExtractValue,
     {
-        if let Value::Ident(name) = value {
-            value = *self.locals.get(&name).unwrap();
+        if let Value::Ident(name) = value
+            && let Some(v) = self.locals.get(&name)
+        {
+            value = *v;
         }
 
         T::extract(&value)
@@ -190,6 +231,25 @@ impl Frame {
                 self.locals.insert(dst, value);
             }
             _ => todo!(),
+        }
+    }
+
+    fn ty<'a>(&self, value: Value, strings: &'a StringTable) -> &'a str {
+        match value {
+            Value::Null => "none",
+            Value::Bool(_) => "bool",
+            Value::Int(_) => "int",
+            Value::Float(_) => "float",
+            Value::String(_) => "string",
+            Value::Ident(ident) => {
+                let name = strings.get(ident).unwrap();
+                if name.eq_ignore_ascii_case(b"self") {
+                    return strings.get(self.self_ty).unwrap().try_into().unwrap();
+                }
+
+                let ty = self.local_types.get(&ident).unwrap();
+                strings.get(*ty).unwrap().try_into().unwrap()
+            }
         }
     }
 }
