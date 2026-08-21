@@ -116,7 +116,6 @@ impl<'a> Parser<'a> {
                     stacks.push(ExprParseStack::default());
                     continue;
                 }
-                TokenKind::Eol => break,
                 _ => {
                     stack.shift(ExprOrToken::Token(&token.kind));
                 }
@@ -418,7 +417,10 @@ impl Op {
 }
 
 fn is_expr_terminator(token: &Token<'_>) -> bool {
-    if matches!(token.kind, TokenKind::Comma | TokenKind::CloseParen) {
+    if matches!(
+        token.kind,
+        TokenKind::Comma | TokenKind::CloseParen | TokenKind::Eol
+    ) {
         return true;
     }
 

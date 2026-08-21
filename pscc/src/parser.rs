@@ -4,14 +4,11 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Range;
-use std::os::linux::raw::stat;
 use std::str::FromStr;
 
-use clap::builder::Str;
-
 use crate::ast::{
-    Assign, Ast, ConditionBlock, Define, Expr, Function, Property, PropertyGroup, State, Statement,
-    Struct, Type, Variable,
+    Ast, ConditionBlock, Define, Expr, Function, Property, PropertyGroup, State, Statement, Struct,
+    Type,
 };
 use crate::lexer::{Literal, Token, TokenKind};
 
@@ -101,7 +98,6 @@ impl<'a> Parser<'a> {
                         }
                         _ => {
                             let global = self.parse_define_stmt()?;
-                            dbg!(&global);
                             globals.push(global);
                         }
                     }
@@ -475,6 +471,12 @@ impl<'a> Parser<'a> {
         if self.peek().is_some_and(|tok| tok.kind == TokenKind::Eq) {
             self.consume();
             value = Some(self.parse_expr()?);
+
+            while self.peek().is_some_and(|tok| tok.kind != TokenKind::Eol) {
+                // TODO: Parse attributes here.
+                self.consume();
+            }
+            self.consume();
         } else {
             self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
         }
@@ -493,6 +495,8 @@ impl<'a> Parser<'a> {
                 self.consume();
 
                 let condition = self.parse_expr()?;
+                self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
+
                 let mut then_block = Vec::new();
 
                 while self
@@ -517,6 +521,7 @@ impl<'a> Parser<'a> {
                 let mut expr = None;
                 if self.peek().is_some_and(|tok| tok.kind != TokenKind::Eol) {
                     expr = Some(self.parse_expr()?);
+                    self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
                 } else {
                     self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
                 }
@@ -542,6 +547,7 @@ impl<'a> Parser<'a> {
                     ])? {
                         ParseToken::Token(TokenKind::Eq) => {
                             let expr = self.parse_expr()?;
+                            self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
                             Some(expr)
                         }
                         ParseToken::Token(TokenKind::Eol) => None,
@@ -556,6 +562,7 @@ impl<'a> Parser<'a> {
                 }
 
                 let expr = self.parse_expr()?;
+                self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
                 Ok(Statement::Expr(expr))
             }
         }
@@ -564,6 +571,7 @@ impl<'a> Parser<'a> {
     fn parse_if(&mut self) -> Result<Statement, Error<'a>> {
         self.consume_next(&[ParseToken::Keyword(Keyword::If)])?;
         let mut condition = self.parse_expr()?;
+        self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
         let mut statements = Vec::new();
 
         let mut blocks = Vec::new();
@@ -579,6 +587,7 @@ impl<'a> Parser<'a> {
 
                     self.consume();
                     condition = self.parse_expr()?;
+                    self.consume_next(&[ParseToken::Token(&TokenKind::Eol)])?;
                     statements = Vec::new();
 
                     continue;
@@ -921,12 +930,6 @@ impl IdentKeyword for Token<'_> {
             _ => None,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-enum ExprOrType {
-    Type(Type),
-    Expr(Expr),
 }
 
 #[derive(Clone, Debug)]

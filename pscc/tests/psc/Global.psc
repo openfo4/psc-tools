@@ -1,6 +1,7 @@
 ScriptName GlobalTest
 
 int MyGlobal = 12
+int MyConstGlobal = 123 const
 
 ;@run: => 12
 int function GetMyGlobal()
