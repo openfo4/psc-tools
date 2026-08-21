@@ -151,9 +151,6 @@ where
                     Instruction::CmpGe(op) => {
                         writeln!(f, "{} = cmpge {} {}", op.dst, op.lhs, op.rhs)?
                     }
-                    Instruction::Index(op) => {
-                        writeln!(f, "{} = index {} {}", op.dst, op.lhs, op.rhs)?
-                    }
                     Instruction::Brif(cond, then_block, then_args, else_block, else_args) => {
                         let then_args = then_args
                             .iter()
@@ -299,7 +296,6 @@ impl DataFlowGraph {
                     | Instruction::CmpLe(op)
                     | Instruction::CmpGt(op)
                     | Instruction::CmpGe(op)
-                    | Instruction::Index(op)
                     | Instruction::StringConcat(op) => {
                         uses.entry(op.lhs).or_default().push(loc);
                         uses.entry(op.rhs).or_default().push(loc);

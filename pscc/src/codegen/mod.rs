@@ -42,7 +42,6 @@ pub enum Instruction<T> {
     Call(Call<T>),
     Jmp(BlockId, Vec<T>),
     Brif(T, BlockId, Vec<T>, BlockId, Vec<T>),
-    Index(Binop<T>),
     Store(Unop<T>),
     Return(T),
     LoadGlobal(String, T),
@@ -622,13 +621,6 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             segments.extend(rhs.clone());
             translator.create_place(segments)
         }
-        Expr::Index { array, index } => {
-            let lhs = lower_expr(translator, array);
-            let rhs = lower_expr(translator, index);
-            let dst = translator.ssa.create_value();
-            translator.push_ins(Instruction::Index(Binop { lhs, rhs, dst }));
-            dst
-        }
         Expr::Assign { src, dst } => {
             let src = load_place_expr(translator, src);
             store_place(translator, src, dst);
@@ -691,7 +683,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         }
         Expr::NewArray { ty, len } => {
             let len = load_place_expr(translator, len);
-            let dst = translator.create_value(Type::Array(Box::new(Type::Int)));
+            let dst = translator.create_value(Type::Array(Box::new(ty.clone())));
             translator.push_ins(Instruction::ArrayAlloc(Unop { src: len, dst }));
             dst
         }

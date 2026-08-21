@@ -261,7 +261,10 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                     value: Value::Ident(reg_names[&op.value]),
                 }),
                 Instruction::ArrayAlloc(op) => pexins::Instruction::ArrayCreate(convert_unop(op)),
-                x => todo!("{:?}", x),
+                Instruction::Cast(op) => pexins::Instruction::Cast(pex::instruction::Unop {
+                    src: Value::Ident(reg_names[&op.src]),
+                    dst: Value::Ident(reg_names[&op.dst]),
+                }),
             };
             instructions.push(out);
         }

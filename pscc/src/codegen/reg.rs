@@ -93,6 +93,10 @@ pub fn ssa_to_reg(
                 Instruction::CmpGt(op) => Instruction::CmpGt(convert_binop(op)),
                 Instruction::CmpGe(op) => Instruction::CmpGe(convert_binop(op)),
                 Instruction::StringConcat(op) => Instruction::StringConcat(convert_binop(op)),
+                Instruction::Store(op) => Instruction::Store(Unop {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                }),
                 Instruction::Call(op) => {
                     let args = op.args.iter().map(|arg| regs.get(*arg)).collect();
 
@@ -209,7 +213,6 @@ pub fn ssa_to_reg(
                     src: regs.get(op.src),
                     dst: regs.alloc(op.dst),
                 }),
-                x => todo!("{:?}", x),
             };
 
             instructions.push(out);
@@ -367,8 +370,7 @@ where
         | Instruction::CmpLe(op)
         | Instruction::CmpGt(op)
         | Instruction::CmpGe(op)
-        | Instruction::StringConcat(op)
-        | Instruction::Index(op) => binop(op),
+        | Instruction::StringConcat(op) => binop(op),
         Instruction::Store(op)
         | Instruction::INeg(op)
         | Instruction::FNeg(op)
@@ -421,6 +423,5 @@ where
             f(op.index);
             f(op.value);
         }
-        x => todo!("{:?}", x),
     }
 }
