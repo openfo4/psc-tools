@@ -6,7 +6,9 @@ use crate::codegen::ssa::BlockId;
 use crate::codegen::{Binop, Callee, ControlFlowGraph, FuncInfo, Instruction, PropertyRef, Unop};
 use crate::lexer::Literal;
 
-use pex::instruction::{CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet, PropertySet};
+use pex::instruction::{
+    ArrayGet, ArraySet, CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet, PropertySet,
+};
 use pex::{Value, VariableDefinition, instruction as pexins};
 
 pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Function {
@@ -247,6 +249,18 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                         })
                     }
                 },
+                Instruction::ArrayLen(op) => pexins::Instruction::ArrayLength(convert_unop(op)),
+                Instruction::ArrayLoad(op) => pexins::Instruction::ArrayGet(ArrayGet {
+                    array: Value::Ident(reg_names[&op.array]),
+                    index: Value::Ident(reg_names[&op.index]),
+                    return_assignment: Value::Ident(reg_names[&op.dst]),
+                }),
+                Instruction::ArrayStore(op) => pexins::Instruction::ArraySet(ArraySet {
+                    array: Value::Ident(reg_names[&op.array]),
+                    index: Value::Ident(reg_names[&op.index]),
+                    value: Value::Ident(reg_names[&op.value]),
+                }),
+                Instruction::ArrayAlloc(op) => pexins::Instruction::ArrayCreate(convert_unop(op)),
                 x => todo!("{:?}", x),
             };
             instructions.push(out);

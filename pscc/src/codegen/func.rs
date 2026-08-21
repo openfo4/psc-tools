@@ -229,6 +229,18 @@ where
                     Instruction::SetProperty(prop, src) => {
                         writeln!(f, "set_property {:?} {}", prop, src)?;
                     }
+                    Instruction::ArrayLen(op) => {
+                        writeln!(f, "{} = array_len {}", op.dst, op.src)?;
+                    }
+                    Instruction::ArrayLoad(op) => {
+                        writeln!(f, "{} = array_load {} {}", op.dst, op.array, op.index)?;
+                    }
+                    Instruction::ArrayStore(op) => {
+                        writeln!(f, "array_store {} {} {}", op.array, op.index, op.value)?;
+                    }
+                    Instruction::ArrayAlloc(op) => {
+                        writeln!(f, "{} = array_alloc {}", op.dst, op.src)?;
+                    }
                 }
             }
         }
@@ -296,7 +308,9 @@ impl DataFlowGraph {
                     Instruction::Store(op)
                     | Instruction::INeg(op)
                     | Instruction::FNeg(op)
-                    | Instruction::BNot(op) => {
+                    | Instruction::BNot(op)
+                    | Instruction::ArrayLen(op)
+                    | Instruction::ArrayAlloc(op) => {
                         uses.entry(op.src).or_default().push(loc);
                         defs.insert(op.dst, loc);
                     }
@@ -343,6 +357,16 @@ impl DataFlowGraph {
                         }
 
                         uses.entry(*src).or_default().push(loc);
+                    }
+                    Instruction::ArrayLoad(op) => {
+                        uses.entry(op.array).or_default().push(loc);
+                        uses.entry(op.index).or_default().push(loc);
+                        defs.insert(op.dst, loc);
+                    }
+                    Instruction::ArrayStore(op) => {
+                        uses.entry(op.array).or_default().push(loc);
+                        uses.entry(op.index).or_default().push(loc);
+                        uses.entry(op.value).or_default().push(loc);
                     }
                 }
             }

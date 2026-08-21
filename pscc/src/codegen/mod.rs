@@ -52,6 +52,10 @@ pub enum Instruction<T> {
     GetProperty(PropertyRef<T>, T),
     SetProperty(PropertyRef<T>, T),
     BNot(Unop<T>),
+    ArrayLen(Unop<T>),
+    ArrayLoad(ArrayLoad<T>),
+    ArrayStore(ArrayStore<T>),
+    ArrayAlloc(Unop<T>),
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +84,20 @@ struct Cast<T> {
     pub dst: T,
     src_ty: Type,
     dst_ty: Type,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ArrayLoad<T> {
+    pub array: T,
+    pub index: T,
+    pub dst: T,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ArrayStore<T> {
+    pub array: T,
+    pub index: T,
+    pub value: T,
 }
 
 #[derive(Clone, Debug)]
@@ -198,7 +216,25 @@ impl<'a> Tranlsator<'a> {
                                 );
                             };
 
+                            if matches!(self.types[&value], TypeOrPlace::Type(Type::Array(_)))
+                                && item.eq_ignore_ascii_case("length")
+                            {
+                                let dst = self.create_value(Type::Int);
+                                self.push_ins(Instruction::ArrayLen(Unop { src: value, dst }));
+                                value = dst;
+                                continue;
+                            }
+
                             unreachable!("unknown item {}", item)
+                        }
+                        PathSegment::Index { array, index } => {
+                            let TypeOrPlace::Type(Type::Array(ty)) = &self.types[&array] else {
+                                unreachable!();
+                            };
+
+                            let dst = self.create_value(*ty.clone());
+                            self.push_ins(Instruction::ArrayLoad(ArrayLoad { array, index, dst }));
+                            value = dst;
                         }
                     }
                 }
@@ -252,6 +288,7 @@ impl<'a> Tranlsator<'a> {
                         }
                     }
                     None => Callee::LocalSelf { func },
+                    _ => unreachable!(),
                 }
             }
             _ => todo!(),
@@ -491,6 +528,11 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             let value = translator.create_place(vec![PathSegment::Item(ident.to_owned())]);
             value
         }
+        Expr::Index { array, index } => {
+            let array = load_place_expr(translator, array);
+            let index = load_place_expr(translator, index);
+            translator.create_place(vec![PathSegment::Index { array, index }])
+        }
         Expr::Add { lhs, rhs } => {
             lower_arithmetic_binop(translator, ArithmeticBinop::Add, lhs, rhs)
         }
@@ -647,6 +689,12 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         Expr::LogicalAnd { lhs: _, rhs: _ } | Expr::LogicalOr { lhs: _, rhs: _ } => {
             unreachable!()
         }
+        Expr::NewArray { ty, len } => {
+            let len = load_place_expr(translator, len);
+            let dst = translator.create_value(Type::Array(Box::new(Type::Int)));
+            translator.push_ins(Instruction::ArrayAlloc(Unop { src: len, dst }));
+            dst
+        }
         x => todo!("{:?}", x),
     }
 }
@@ -700,6 +748,19 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                             continue;
                         }
                     }
+                    PathSegment::Index { array, index } => {
+                        let TypeOrPlace::Type(Type::Array(ty)) = &translator.types[&array] else {
+                            unreachable!();
+                        };
+
+                        let dst = translator.create_value(*ty.clone());
+                        translator.push_ins(Instruction::ArrayLoad(ArrayLoad {
+                            array: *array,
+                            index: *index,
+                            dst,
+                        }));
+                        place = dst;
+                    }
                 }
             }
 
@@ -736,6 +797,19 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                     }
 
                     todo!();
+                }
+                PathSegment::Index { array, index } => {
+                    let TypeOrPlace::Type(Type::Array(ty)) = &translator.types[&array] else {
+                        unreachable!();
+                    };
+
+                    let value = convert_to(translator, value, *ty.clone());
+                    translator.push_ins(Instruction::ArrayStore(ArrayStore {
+                        array: *array,
+                        index: *index,
+                        value,
+                    }));
+                    return;
                 }
             }
         }
@@ -847,6 +921,7 @@ enum TypeOrPlace {
 enum PathSegment {
     Local(Value),
     Item(String),
+    Index { array: Value, index: Value },
 }
 
 #[derive(Clone, Debug)]

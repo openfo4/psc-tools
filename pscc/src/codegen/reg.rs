@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use crate::ast::Type;
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
-use crate::codegen::{Binop, Call, Callee, Cast, Instruction, Param, PropertyRef, Unop};
+use crate::codegen::{
+    ArrayLoad, ArrayStore, Binop, Call, Callee, Cast, Instruction, Param, PropertyRef, Unop,
+};
 
 pub fn ssa_to_reg(
     cfg: &ControlFlowGraph<Value>,
@@ -189,6 +191,24 @@ pub fn ssa_to_reg(
                         regs.get(*src),
                     ),
                 },
+                Instruction::ArrayLen(op) => Instruction::ArrayLen(Unop {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                }),
+                Instruction::ArrayLoad(op) => Instruction::ArrayLoad(ArrayLoad {
+                    array: regs.get(op.array),
+                    index: regs.get(op.index),
+                    dst: regs.alloc(op.dst),
+                }),
+                Instruction::ArrayStore(op) => Instruction::ArrayStore(ArrayStore {
+                    array: regs.get(op.array),
+                    index: regs.get(op.index),
+                    value: regs.get(op.value),
+                }),
+                Instruction::ArrayAlloc(op) => Instruction::ArrayAlloc(Unop {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                }),
                 x => todo!("{:?}", x),
             };
 
@@ -352,7 +372,9 @@ where
         Instruction::Store(op)
         | Instruction::INeg(op)
         | Instruction::FNeg(op)
-        | Instruction::BNot(op) => {
+        | Instruction::BNot(op)
+        | Instruction::ArrayLen(op)
+        | Instruction::ArrayAlloc(op) => {
             f(op.src);
         }
         Instruction::Brif(condition, _, then_args, _, else_args) => {
@@ -389,6 +411,15 @@ where
                 PropertyRef::Local(_) => {}
                 PropertyRef::Other(value, _) => f(*value),
             }
+        }
+        Instruction::ArrayLoad(op) => {
+            f(op.array);
+            f(op.index);
+        }
+        Instruction::ArrayStore(op) => {
+            f(op.array);
+            f(op.index);
+            f(op.value);
         }
         x => todo!("{:?}", x),
     }
