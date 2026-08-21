@@ -42,6 +42,14 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokenKind::OpenBracket => {
+                    if stack.ends_with_ident() {
+                        stack.ends_with_call = true;
+
+                        // Deref has higher precedence that the index operation.
+                        while stack.ends_with_op(Op::Deref) {
+                            stack.reduce_top(Op::Deref);
+                        }
+                    }
                     stacks.push(ExprParseStack::default());
                     continue;
                 }
@@ -628,6 +636,38 @@ mod tests {
                     }),
                 }),
                 args: Vec::new()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_deref_index() {
+        let tokens = [
+            token(TokenKind::Ident("x")),
+            token(TokenKind::Dot),
+            token(TokenKind::Ident("y")),
+            token(TokenKind::OpenBracket),
+            token(TokenKind::Ident("z")),
+            token(TokenKind::CloseBracket),
+            token(TokenKind::Eol),
+        ];
+        let mut parser = Parser::new(&tokens);
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            Expr::Index {
+                array: Box::new(Expr::Deref {
+                    lhs: Box::new(Expr::Ident {
+                        ident: "x".to_owned()
+                    }),
+                    rhs: Box::new(Expr::Ident {
+                        ident: "y".to_owned()
+                    }),
+                }),
+                index: Box::new(Expr::Ident {
+                    ident: "z".to_owned()
+                })
             }
         );
     }
