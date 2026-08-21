@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::ast::{Expr, Type};
-use crate::lexer::{Literal, TokenKind};
+use crate::lexer::{Literal, Token, TokenKind};
 use crate::parser::{Error, IdentKeyword, Keyword, ParseToken, Parser};
 
 impl<'a> Parser<'a> {
@@ -14,7 +14,7 @@ impl<'a> Parser<'a> {
             // when an '(' existed before).
             // These tokens indicate that the expression is over.
             // Note that we must not consume the token itself.
-            if matches!(token.kind, TokenKind::Comma | TokenKind::CloseParen) && stacks.len() == 1 {
+            if is_expr_terminator(token) && stacks.len() == 1 {
                 break;
             }
 
@@ -415,6 +415,21 @@ impl Op {
                 | Self::RemAssign
         )
     }
+}
+
+fn is_expr_terminator(token: &Token<'_>) -> bool {
+    if matches!(token.kind, TokenKind::Comma | TokenKind::CloseParen) {
+        return true;
+    }
+
+    if token
+        .keyword()
+        .is_some_and(|keyword| keyword.is_global_attribute())
+    {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]

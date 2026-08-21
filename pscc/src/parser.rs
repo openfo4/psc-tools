@@ -812,6 +812,15 @@ enum Keyword {
     AutoReadOnly,
 }
 
+impl Keyword {
+    /// Returns `true` if this `Keyword` is a global attribute.
+    ///
+    /// Global attributes are allowed to follow expressions when defined in a global context.
+    pub const fn is_global_attribute(&self) -> bool {
+        matches!(self, Self::Const)
+    }
+}
+
 impl FromStr for Keyword {
     type Err = ();
 
