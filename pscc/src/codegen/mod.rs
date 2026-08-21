@@ -15,6 +15,7 @@ use crate::codegen::func::{Block, ControlFlowGraph};
 use crate::codegen::reg::Register;
 use crate::codegen::ssa::{BlockId, SsaBuilder, Value, Var};
 use crate::lexer::Literal;
+use crate::registry::Registry;
 use crate::{StringBuilder, ast};
 
 #[derive(Clone, Debug)]
@@ -110,10 +111,11 @@ struct Tranlsator<'a> {
     func: &'a Function,
     types: HashMap<Value, TypeOrPlace>,
     var_types: HashMap<Var, TypeOrPlace>,
+    registry: &'a Registry,
 }
 
 impl<'a> Tranlsator<'a> {
-    fn new(ast: &'a Ast, func: &'a Function) -> Self {
+    fn new(ast: &'a Ast, func: &'a Function, registry: &'a Registry) -> Self {
         let mut ssa = SsaBuilder::new();
         let entry = ssa.create_block();
         ssa.seal(entry);
@@ -132,6 +134,7 @@ impl<'a> Tranlsator<'a> {
             entry,
             types: HashMap::new(),
             var_types: HashMap::new(),
+            registry,
         }
     }
 
@@ -224,6 +227,18 @@ impl<'a> Tranlsator<'a> {
                                 continue;
                             }
 
+                            if let TypeOrPlace::Type(Type::Ty(class)) = &self.types[&value]
+                                && let Some(prop) = self.registry.property(&class, &item)
+                            {
+                                let dst = self.create_value(prop.clone());
+                                self.push_ins(Instruction::GetProperty(
+                                    PropertyRef::Other(value, item.clone()),
+                                    dst,
+                                ));
+                                value = dst;
+                                continue;
+                            }
+
                             unreachable!("unknown item {}", item)
                         }
                         PathSegment::Index { array, index } => {
@@ -260,35 +275,28 @@ impl<'a> Tranlsator<'a> {
     fn load_place_as_func(&mut self, value: Value) -> Callee<Value> {
         match &self.types[&value] {
             TypeOrPlace::Place(segments) => {
-                let mut segments: &[PathSegment] = &segments;
-                debug_assert_matches!(segments.len(), 1 | 2);
-
                 // The function name is the last segment.
-                let PathSegment::Item(func) = segments.split_off_last().unwrap() else {
+                let PathSegment::Item(func) = segments.last().unwrap() else {
                     unreachable!();
                 };
 
                 let func = func.to_owned();
-                match segments.get(0) {
-                    Some(PathSegment::Local(local)) => Callee::Local {
-                        object: *local,
-                        func,
-                    },
-                    Some(PathSegment::Item(item)) => {
-                        if let Some(global) = self.ast.globals.iter().find(|v| &v.name == item) {
-                            let dst = self.create_value(global.ty.clone());
-                            self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
-                            return Callee::Local { object: dst, func };
-                        }
 
-                        Callee::Static {
-                            class: item.to_owned(),
-                            func,
-                        }
-                    }
-                    None => Callee::LocalSelf { func },
-                    _ => unreachable!(),
+                if segments.len() == 1 {
+                    return Callee::LocalSelf { func };
                 }
+
+                if let PathSegment::Item(class) = &segments[0]
+                    && segments.len() == 2
+                {
+                    return Callee::Static {
+                        class: class.to_owned(),
+                        func,
+                    };
+                }
+
+                let object = self.load_place(value, 1);
+                Callee::Local { object, func }
             }
             _ => todo!(),
         }
@@ -306,12 +314,13 @@ pub fn lower_function(
     func: &Function,
     strings: &mut StringBuilder,
     opts: &CodegenOptions,
+    registry: &Registry,
 ) -> pex::Function {
     if func.is_native {
         return lower_native_function(func, strings, opts);
     }
 
-    let mut translator = Tranlsator::new(ast, func);
+    let mut translator = Tranlsator::new(ast, func, registry);
 
     let mut params = Vec::new();
     for param in &func.params {

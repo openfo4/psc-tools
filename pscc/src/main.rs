@@ -63,6 +63,8 @@ fn main() -> ExitCode {
 
     let mut ast_to_compile = None;
 
+    let mut registry = Registry::default();
+
     for ((_, id), tokens) in data.iter().zip(file_tokens) {
         let mut parser = parser::Parser::new(&tokens);
         let Ok(ast) = parser.parse().inspect_err(|err| {
@@ -86,6 +88,8 @@ fn main() -> ExitCode {
             }
         }
 
+        registry.classes.insert(ast.script_name.clone(), info);
+
         ast_to_compile = Some(ast);
     }
 
@@ -95,7 +99,7 @@ fn main() -> ExitCode {
 
     let filename = args.input.file_name().unwrap();
 
-    let module = compile_module(&ast);
+    let module = compile_module(&ast, &registry);
     let bytes = module.write();
 
     std::fs::create_dir_all(&args.out_dir).unwrap();
@@ -125,7 +129,7 @@ impl StringBuilder {
     }
 }
 
-fn compile_module(ast: &Ast) -> pex::Module {
+fn compile_module(ast: &Ast, registry: &Registry) -> pex::Module {
     let mut strings = StringBuilder::default();
 
     let mut functions = Vec::new();
@@ -137,6 +141,7 @@ fn compile_module(ast: &Ast) -> pex::Module {
             &CodegenOptions {
                 preserve_parameter_names: true,
             },
+            registry,
         );
         functions.push(NamedFunction {
             name: strings.insert(&func.name),
