@@ -647,12 +647,7 @@ impl<'a> Parser<'a> {
                 Literal::None => Ok(Expr::Literal(Literal::None)),
                 Literal::Bool(v) => Ok(Expr::Literal(Literal::Bool(*v))),
                 Literal::NumberInt(lit) => Ok(Expr::Literal(Literal::NumberInt(*lit))),
-                Literal::NumberDecimal { integer, fraction } => {
-                    Ok(Expr::Literal(Literal::NumberDecimal {
-                        integer: *integer,
-                        fraction: *fraction,
-                    }))
-                }
+                Literal::NumberDecimal(lit) => Ok(Expr::Literal(Literal::NumberDecimal(*lit))),
                 Literal::String(lit) => {
                     Ok(Expr::Literal(Literal::String(Cow::Owned(lit.to_string()))))
                 }

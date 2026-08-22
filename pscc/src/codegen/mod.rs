@@ -532,10 +532,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 Literal::None => Type::None,
                 Literal::Bool(_) => Type::Bool,
                 Literal::NumberInt(_) => Type::Int,
-                Literal::NumberDecimal {
-                    integer: _,
-                    fraction: _,
-                } => Type::Float,
+                Literal::NumberDecimal(_) => Type::Float,
                 Literal::String(_) => Type::String,
             };
 
@@ -1108,10 +1105,7 @@ fn eval_constant_expr(expr: &Expr, strings: &mut StringBuilder) -> pex::Value {
         Expr::Literal(Literal::None) => pex::Value::Null,
         Expr::Literal(Literal::Bool(v)) => pex::Value::Bool(*v),
         Expr::Literal(Literal::NumberInt(v)) => pex::Value::Int(*v),
-        Expr::Literal(Literal::NumberDecimal { integer, fraction }) => {
-            // todo!()
-            pex::Value::Float(0.0)
-        }
+        Expr::Literal(Literal::NumberDecimal(lit)) => pex::Value::Float(lit.to_f32()),
         Expr::Literal(Literal::String(v)) => pex::Value::String(strings.insert(v)),
         Expr::Neg { value } => match eval_constant_expr(value, strings) {
             pex::Value::Int(v) => pex::Value::Int(-v),

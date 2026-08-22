@@ -150,12 +150,7 @@ impl ExprOrToken<'_> {
                 Literal::None => Expr::Literal(Literal::None),
                 Literal::Bool(v) => Expr::Literal(Literal::Bool(*v)),
                 Literal::NumberInt(lit) => Expr::Literal(Literal::NumberInt(*lit)),
-                Literal::NumberDecimal { integer, fraction } => {
-                    Expr::Literal(Literal::NumberDecimal {
-                        integer: *integer,
-                        fraction: *fraction,
-                    })
-                }
+                Literal::NumberDecimal(lit) => Expr::Literal(Literal::NumberDecimal(*lit)),
                 Literal::String(lit) => Expr::Literal(Literal::String(Cow::Owned(lit.to_string()))),
             },
             _ => todo!(),

@@ -75,8 +75,25 @@ pub enum Literal<'a> {
     None,
     Bool(bool),
     NumberInt(i32),
-    NumberDecimal { integer: i32, fraction: i32 },
+    NumberDecimal(DecimalLiteral),
     String(Cow<'a, str>),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct DecimalLiteral {
+    pub integer: i32,
+    pub fraction: u32,
+}
+
+impl DecimalLiteral {
+    pub fn to_f32(&self) -> f32 {
+        if self.fraction == 0 {
+            self.integer as f32
+        } else {
+            let frac = 0.1_f32.powi(self.fraction.ilog10().cast_signed());
+            self.integer as f32 + frac
+        }
+    }
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
@@ -181,10 +198,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token<'_>>, Error> {
                     let end = end + frac_end + '.'.len_utf8();
 
                     (
-                        Some(TokenKind::Literal(Literal::NumberDecimal {
+                        Some(TokenKind::Literal(Literal::NumberDecimal(DecimalLiteral {
                             integer,
                             fraction,
-                        })),
+                        }))),
                         &s[end..],
                     )
                 } else {
@@ -343,7 +360,7 @@ fn unescape_string(s: &str) -> Result<Cow<'_, str>, Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::{Literal, Token, TokenKind, tokenize};
+    use crate::lexer::{DecimalLiteral, Literal, Token, TokenKind, tokenize};
 
     #[test]
     fn decimal_literal() {
@@ -353,10 +370,10 @@ mod tests {
             tokens,
             [Token {
                 span: 0..7,
-                kind: TokenKind::Literal(Literal::NumberDecimal {
+                kind: TokenKind::Literal(Literal::NumberDecimal(DecimalLiteral {
                     integer: 501,
                     fraction: 623
-                })
+                }))
             }]
         );
     }

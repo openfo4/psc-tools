@@ -78,10 +78,7 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                             Literal::None => Value::Null,
                             Literal::Bool(value) => Value::Bool(*value),
                             Literal::NumberInt(value) => Value::Int(*value),
-                            Literal::NumberDecimal { integer, fraction } => {
-                                // TODO
-                                Value::Float(0.0)
-                            }
+                            Literal::NumberDecimal(lit) => Value::Float(lit.to_f32()),
                             _ => todo!(),
                         },
                         dst: Value::Ident(reg_names[dst]),
