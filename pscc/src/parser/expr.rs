@@ -41,6 +41,40 @@ impl<'a> Parser<'a> {
                         stack.shift(ExprOrToken::Expr(Expr::New { ty }));
                     }
                 }
+                _ if token.keyword() == Some(Keyword::As) => {
+                    if stack.ends_with_ident() {
+                        stack.ends_with_call = true;
+
+                        // Deref has higher precedence that the as operation.
+                        while stack.ends_with_op(Op::Deref) {
+                            stack.reduce_top(Op::Deref);
+                        }
+                    }
+
+                    let lhs = stack.stack.pop().unwrap().into_expr();
+                    let ty = self.parse_inline_type()?;
+                    stack.shift(ExprOrToken::Expr(Expr::Cast {
+                        lhs: Box::new(lhs),
+                        rhs: ty,
+                    }));
+                }
+                _ if token.keyword() == Some(Keyword::Is) => {
+                    if stack.ends_with_ident() {
+                        stack.ends_with_call = true;
+
+                        // Deref has higher precedence that the as operation.
+                        while stack.ends_with_op(Op::Deref) {
+                            stack.reduce_top(Op::Deref);
+                        }
+                    }
+
+                    let lhs = stack.stack.pop().unwrap().into_expr();
+                    let ty = self.parse_inline_type()?;
+                    stack.shift(ExprOrToken::Expr(Expr::Is {
+                        lhs: Box::new(lhs),
+                        rhs: ty,
+                    }));
+                }
                 TokenKind::OpenBracket => {
                     if stack.ends_with_ident() {
                         stack.ends_with_call = true;
@@ -680,6 +714,28 @@ mod tests {
                 index: Box::new(Expr::Ident {
                     ident: "z".to_owned()
                 })
+            }
+        );
+    }
+
+    #[test]
+    fn parse_as() {
+        let tokens = [
+            token(TokenKind::Ident("x")),
+            token(TokenKind::Ident("as")),
+            token(TokenKind::Ident("int")),
+            token(TokenKind::Eol),
+        ];
+        let mut parser = Parser::new(&tokens);
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            Expr::Cast {
+                lhs: Box::new(Expr::Ident {
+                    ident: "x".to_owned()
+                }),
+                rhs: Type::Int
             }
         );
     }

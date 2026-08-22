@@ -58,6 +58,7 @@ pub enum Instruction<T> {
     StructLoad(StructLoad<T>),
     StructStore(StructStore<T>),
     StructAlloc(T),
+    Is(Is<T>),
 }
 
 #[derive(Clone, Debug)]
@@ -82,6 +83,14 @@ struct Call<T> {
 
 #[derive(Clone, Debug)]
 struct Cast<T> {
+    pub src: T,
+    pub dst: T,
+    src_ty: Type,
+    dst_ty: Type,
+}
+
+#[derive(Clone, Debug)]
+pub struct Is<T> {
     pub src: T,
     pub dst: T,
     src_ty: Type,
@@ -742,6 +751,36 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
 
             let dst = translator.create_value(Type::Ty(ty.clone()));
             translator.push_ins(Instruction::StructAlloc(dst));
+            dst
+        }
+        Expr::Cast { lhs, rhs } => {
+            let src = load_place_expr(translator, lhs);
+            let dst = translator.create_value(rhs.clone());
+            let TypeOrPlace::Type(src_ty) = translator.types[&src].clone() else {
+                unreachable!();
+            };
+
+            translator.push_ins(Instruction::Cast(Cast {
+                src,
+                dst,
+                src_ty,
+                dst_ty: rhs.clone(),
+            }));
+            dst
+        }
+        Expr::Is { lhs, rhs } => {
+            let src = load_place_expr(translator, lhs);
+            let dst = translator.create_value(Type::Bool);
+            let TypeOrPlace::Type(src_ty) = translator.types[&src].clone() else {
+                unreachable!();
+            };
+
+            translator.push_ins(Instruction::Is(Is {
+                src,
+                dst,
+                src_ty,
+                dst_ty: rhs.clone(),
+            }));
             dst
         }
     }

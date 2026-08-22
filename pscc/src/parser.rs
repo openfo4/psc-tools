@@ -332,7 +332,7 @@ impl<'a> Parser<'a> {
 
     fn parse_inline_type(&mut self) -> Result<Type, Error<'a>> {
         let ty = self.consume_ident()?;
-        let mut ty = Type::Ty(ty.to_owned());
+        let mut ty = Type::new(ty);
 
         while self
             .tokens
@@ -814,6 +814,8 @@ enum Keyword {
     Native,
     DebugOnly,
     AutoReadOnly,
+    As,
+    Is,
 }
 
 impl Keyword {
@@ -862,6 +864,8 @@ impl FromStr for Keyword {
             s if s.eq_ignore_ascii_case("Native") => Ok(Self::Native),
             s if s.eq_ignore_ascii_case("DebugOnly") => Ok(Self::DebugOnly),
             s if s.eq_ignore_ascii_case("AutoReadOnly") => Ok(Self::AutoReadOnly),
+            s if s.eq_ignore_ascii_case("as") => Ok(Self::As),
+            s if s.eq_ignore_ascii_case("is") => Ok(Self::Is),
             _ => Err(()),
         }
     }
@@ -902,6 +906,8 @@ impl Display for Keyword {
             Self::Native => f.write_str("native"),
             Self::DebugOnly => f.write_str("DebugOnly"),
             Self::AutoReadOnly => f.write_str("AutoReadOnly"),
+            Self::As => f.write_str("as"),
+            Self::Is => f.write_str("is"),
         }
     }
 }

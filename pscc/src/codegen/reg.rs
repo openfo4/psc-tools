@@ -4,8 +4,8 @@ use crate::ast::Type;
 use crate::codegen::func::{Block, ControlFlowGraph, DataFlowGraph};
 use crate::codegen::ssa::Value;
 use crate::codegen::{
-    ArrayLoad, ArrayStore, Binop, Call, Callee, Cast, Instruction, Param, PropertyRef, StructLoad,
-    StructStore, Unop,
+    ArrayLoad, ArrayStore, Binop, Call, Callee, Cast, Instruction, Is, Param, PropertyRef,
+    StructLoad, StructStore, Unop,
 };
 
 pub fn ssa_to_reg(
@@ -225,6 +225,12 @@ pub fn ssa_to_reg(
                     value: regs.get(op.value),
                 }),
                 Instruction::StructAlloc(dst) => Instruction::StructAlloc(regs.alloc(*dst)),
+                Instruction::Is(op) => Instruction::Is(Is {
+                    src: regs.get(op.src),
+                    dst: regs.alloc(op.dst),
+                    src_ty: op.src_ty.clone(),
+                    dst_ty: op.dst_ty.clone(),
+                }),
             };
 
             instructions.push(out);
@@ -443,5 +449,8 @@ where
             f(op.value);
         }
         Instruction::StructAlloc(_) => {}
+        Instruction::Is(op) => {
+            f(op.src);
+        }
     }
 }

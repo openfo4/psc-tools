@@ -279,6 +279,11 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                 Instruction::StructAlloc(dst) => pexins::Instruction::StructCreate(StructCreate {
                     return_assignment: Value::Ident(reg_names[dst]),
                 }),
+                Instruction::Is(op) => pexins::Instruction::Is(pex::instruction::Is {
+                    object: Value::Ident(reg_names[&op.src]),
+                    class: strings.insert(&op.dst_ty.to_string()),
+                    return_assignment: Value::Ident(reg_names[&op.dst]),
+                }),
             };
             instructions.push(out);
         }

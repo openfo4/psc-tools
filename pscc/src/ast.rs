@@ -149,6 +149,8 @@ pub enum Expr {
     NewArray { ty: Type, len: Box<Expr> },
     New { ty: Type },
     Index { array: Box<Expr>, index: Box<Expr> },
+    Cast { lhs: Box<Expr>, rhs: Type },
+    Is { lhs: Box<Expr>, rhs: Type },
 }
 
 #[derive(Clone, Debug)]

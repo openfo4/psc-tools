@@ -247,6 +247,9 @@ where
                     Instruction::StructAlloc(dst) => {
                         writeln!(f, "{} = struct_alloc", dst)?;
                     }
+                    Instruction::Is(op) => {
+                        writeln!(f, "{} = is {} {} {}", op.dst, op.src, op.src_ty, op.dst_ty)?;
+                    }
                 }
             }
         }
@@ -383,6 +386,10 @@ impl DataFlowGraph {
                     }
                     Instruction::StructAlloc(dst) => {
                         defs.insert(*dst, loc);
+                    }
+                    Instruction::Is(op) => {
+                        uses.entry(op.src).or_default().push(loc);
+                        defs.insert(op.dst, loc);
                     }
                 }
             }
