@@ -119,8 +119,8 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
 
                     let condition = Value::Ident(reg_names[condition]);
 
-                    let succ = schedule_succ.get(&id).unwrap();
-                    if *succ == *then_block {
+                    let succ = schedule_succ.get(&id);
+                    if succ == Some(then_block) {
                         branches.push(BranchReloc {
                             block: id,
                             instruction: instructions.len(),
@@ -131,7 +131,7 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                             condition,
                             offset: 0,
                         })
-                    } else if *succ == *else_block {
+                    } else if succ == Some(else_block) {
                         branches.push(BranchReloc {
                             block: id,
                             instruction: instructions.len(),
@@ -165,8 +165,7 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                 Instruction::Jmp(block, args) => {
                     debug_assert!(args.is_empty());
 
-                    let succ = schedule_succ.get(&id).unwrap();
-                    if *succ == *block {
+                    if schedule_succ.get(&id) == Some(block) {
                         continue;
                     }
 

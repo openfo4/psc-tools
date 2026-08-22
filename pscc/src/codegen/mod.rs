@@ -183,6 +183,15 @@ impl<'a> Tranlsator<'a> {
         self.cur_block = Some(block);
     }
 
+    pub fn seal_block(&mut self, block: BlockId) {
+        self.ssa.seal(block);
+        for (var, ty) in &self.var_types {
+            for value in self.ssa.var_values(*var) {
+                self.types.insert(*value, ty.clone());
+            }
+        }
+    }
+
     fn load_place(&mut self, value: Value, skip_last: usize) -> Value {
         match self.types.get(&value) {
             Some(TypeOrPlace::Place(segments)) => {
@@ -462,7 +471,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
 
                 lower_condition_expr(translator, &block.condition, then_block, next_block);
 
-                translator.ssa.seal(then_block);
+                translator.seal_block(then_block);
                 translator.switch_to_block(then_block);
                 for stmt in &block.statements {
                     lower_stmt(translator, stmt);
@@ -472,7 +481,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
                 translator.ssa.branch(&[merge_block]);
 
                 translator.switch_to_block(next_block);
-                translator.ssa.seal(next_block);
+                translator.seal_block(next_block);
 
                 next_block = translator.ssa.create_block();
             }
@@ -484,7 +493,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
             translator.push_ins(Instruction::Jmp(merge_block, Vec::new()));
             translator.ssa.branch(&[merge_block]);
 
-            translator.ssa.seal(merge_block);
+            translator.seal_block(merge_block);
             translator.switch_to_block(merge_block);
         }
         Statement::While {
@@ -501,7 +510,7 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
             translator.switch_to_block(cond_block);
             lower_condition_expr(translator, condition, body_block, merge_block);
 
-            translator.ssa.seal(body_block);
+            translator.seal_block(body_block);
             translator.switch_to_block(body_block);
             for stmt in then_block {
                 lower_stmt(translator, stmt);
@@ -509,9 +518,9 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
 
             translator.push_ins(Instruction::Jmp(cond_block, Vec::new()));
             translator.ssa.branch(&[cond_block]);
-            translator.ssa.seal(cond_block);
+            translator.seal_block(cond_block);
 
-            translator.ssa.seal(merge_block);
+            translator.seal_block(merge_block);
             translator.switch_to_block(merge_block);
         }
         Statement::Return(expr) => {

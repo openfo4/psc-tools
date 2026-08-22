@@ -49,3 +49,21 @@ int function NestedIf(int x)
 
     return x
 endFunction
+
+;@run: x = 0 => 0
+;@run: x = 5 => 3
+;@run: x = 20 => 15
+int function IfInWhile(int x)
+    int i = 0
+    int iters = 0
+    while i < x
+        i += 1
+        iters += 1
+
+        if i < 10
+            i += 1
+        endIf
+    endWhile
+
+    return iters
+endFunction

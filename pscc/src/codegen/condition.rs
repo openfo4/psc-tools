@@ -13,7 +13,7 @@ pub fn lower_condition_expr(
             let lhs_true_block = translator.create_block();
             lower_condition_expr(translator, lhs, lhs_true_block, false_block);
 
-            translator.ssa.seal(lhs_true_block);
+            translator.seal_block(lhs_true_block);
             translator.switch_to_block(lhs_true_block);
 
             lower_condition_expr(translator, rhs, true_block, false_block);
@@ -22,7 +22,7 @@ pub fn lower_condition_expr(
             let lhs_false_block = translator.create_block();
             lower_condition_expr(translator, lhs, true_block, lhs_false_block);
 
-            translator.ssa.seal(lhs_false_block);
+            translator.seal_block(lhs_false_block);
             translator.switch_to_block(lhs_false_block);
 
             lower_condition_expr(translator, rhs, true_block, false_block);

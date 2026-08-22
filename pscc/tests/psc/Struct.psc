@@ -31,7 +31,7 @@ bool function IsAllTruthy(MyStruct s)
     return true
 endFunction
 
-bool function IsAllTruthy(MyStruct[] arr)
+bool function IsAllTruthyArray(MyStruct[] arr)
     int i = 0
     while i < arr.Length
         if !IsAllTruthy(arr[i])
