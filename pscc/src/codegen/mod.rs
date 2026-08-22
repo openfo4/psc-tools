@@ -5,7 +5,6 @@ mod reg;
 mod ssa;
 
 use std::collections::HashMap;
-use std::debug_assert_matches;
 
 use pex::VariableDefinition;
 
@@ -56,6 +55,9 @@ pub enum Instruction<T> {
     ArrayLoad(ArrayLoad<T>),
     ArrayStore(ArrayStore<T>),
     ArrayAlloc(Unop<T>),
+    StructLoad(StructLoad<T>),
+    StructStore(StructStore<T>),
+    StructAlloc(T),
 }
 
 #[derive(Clone, Debug)]
@@ -97,6 +99,20 @@ pub struct ArrayLoad<T> {
 pub struct ArrayStore<T> {
     pub array: T,
     pub index: T,
+    pub value: T,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructLoad<T> {
+    pub struct_: T,
+    pub member: String,
+    pub dst: T,
+}
+
+#[derive(Clone, Debug)]
+pub struct StructStore<T> {
+    pub struct_: T,
+    pub member: String,
     pub value: T,
 }
 
@@ -235,6 +251,19 @@ impl<'a> Tranlsator<'a> {
                                     PropertyRef::Other(value, item.clone()),
                                     dst,
                                 ));
+                                value = dst;
+                                continue;
+                            }
+
+                            if let TypeOrPlace::Type(Type::Ty(struct_)) = &self.types[&value]
+                                && let Some(member_ty) = self.registry.struct_member(struct_, &item)
+                            {
+                                let dst = self.create_value(member_ty.clone());
+                                self.push_ins(Instruction::StructLoad(StructLoad {
+                                    struct_: value,
+                                    member: item.clone(),
+                                    dst,
+                                }));
                                 value = dst;
                                 continue;
                             }
@@ -696,7 +725,19 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
             translator.push_ins(Instruction::ArrayAlloc(Unop { src: len, dst }));
             dst
         }
-        x => todo!("{:?}", x),
+        Expr::New { ty } => {
+            let Type::Ty(ty) = ty else {
+                unreachable!();
+            };
+
+            if !translator.registry.structs.contains_key(ty) {
+                panic!("unknown struct {}", ty);
+            }
+
+            let dst = translator.create_value(Type::Ty(ty.clone()));
+            translator.push_ins(Instruction::StructAlloc(dst));
+            dst
+        }
     }
 }
 
@@ -794,6 +835,18 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                             PropertyRef::Local(prop.name.clone()),
                             value,
                         ));
+                        return;
+                    }
+
+                    if let TypeOrPlace::Type(Type::Ty(struct_)) = &translator.types[&value]
+                        && let Some(member_ty) = translator.registry.struct_member(struct_, item)
+                    {
+                        let value = convert_to(translator, value, member_ty.clone());
+                        translator.push_ins(Instruction::StructStore(StructStore {
+                            struct_: place,
+                            member: item.clone(),
+                            value,
+                        }));
                         return;
                     }
 
@@ -1060,6 +1113,11 @@ fn eval_constant_expr(expr: &Expr, strings: &mut StringBuilder) -> pex::Value {
             pex::Value::Float(0.0)
         }
         Expr::Literal(Literal::String(v)) => pex::Value::String(strings.insert(v)),
-        _ => todo!(),
+        Expr::Neg { value } => match eval_constant_expr(value, strings) {
+            pex::Value::Int(v) => pex::Value::Int(-v),
+            pex::Value::Float(v) => pex::Value::Float(-v),
+            _ => unreachable!(),
+        },
+        x => todo!("{x:?}",),
     }
 }

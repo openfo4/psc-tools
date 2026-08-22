@@ -238,6 +238,15 @@ where
                     Instruction::ArrayAlloc(op) => {
                         writeln!(f, "{} = array_alloc {}", op.dst, op.src)?;
                     }
+                    Instruction::StructLoad(op) => {
+                        writeln!(f, "{} = struct_load {} {}", op.dst, op.struct_, op.member)?;
+                    }
+                    Instruction::StructStore(op) => {
+                        writeln!(f, "struct_store {} {} {}", op.struct_, op.member, op.value)?;
+                    }
+                    Instruction::StructAlloc(dst) => {
+                        writeln!(f, "{} = struct_alloc", dst)?;
+                    }
                 }
             }
         }
@@ -363,6 +372,17 @@ impl DataFlowGraph {
                         uses.entry(op.array).or_default().push(loc);
                         uses.entry(op.index).or_default().push(loc);
                         uses.entry(op.value).or_default().push(loc);
+                    }
+                    Instruction::StructLoad(op) => {
+                        uses.entry(op.struct_).or_default().push(loc);
+                        defs.insert(op.dst, loc);
+                    }
+                    Instruction::StructStore(op) => {
+                        uses.entry(op.struct_).or_default().push(loc);
+                        uses.entry(op.value).or_default().push(loc);
+                    }
+                    Instruction::StructAlloc(dst) => {
+                        defs.insert(*dst, loc);
                     }
                 }
             }

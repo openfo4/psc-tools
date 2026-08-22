@@ -8,6 +8,7 @@ use crate::lexer::Literal;
 
 use pex::instruction::{
     ArrayGet, ArraySet, CallMethod, CallStatic, ConditionalJump, Jump, PropertyGet, PropertySet,
+    StructCreate, StructGet, StructSet,
 };
 use pex::{Value, VariableDefinition, instruction as pexins};
 
@@ -77,6 +78,10 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                             Literal::None => Value::Null,
                             Literal::Bool(value) => Value::Bool(*value),
                             Literal::NumberInt(value) => Value::Int(*value),
+                            Literal::NumberDecimal { integer, fraction } => {
+                                // TODO
+                                Value::Float(0.0)
+                            }
                             _ => todo!(),
                         },
                         dst: Value::Ident(reg_names[dst]),
@@ -264,6 +269,19 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                 Instruction::Cast(op) => pexins::Instruction::Cast(pex::instruction::Unop {
                     src: Value::Ident(reg_names[&op.src]),
                     dst: Value::Ident(reg_names[&op.dst]),
+                }),
+                Instruction::StructLoad(op) => pexins::Instruction::StructGet(StructGet {
+                    struct_value: Value::Ident(reg_names[&op.struct_]),
+                    member_name: strings.insert(&op.member),
+                    return_assignment: Value::Ident(reg_names[&op.dst]),
+                }),
+                Instruction::StructStore(op) => pexins::Instruction::StructSet(StructSet {
+                    struct_value: Value::Ident(reg_names[&op.struct_]),
+                    member_name: strings.insert(&op.member),
+                    value: Value::Ident(reg_names[&op.value]),
+                }),
+                Instruction::StructAlloc(dst) => pexins::Instruction::StructCreate(StructCreate {
+                    return_assignment: Value::Ident(reg_names[dst]),
                 }),
             };
             instructions.push(out);

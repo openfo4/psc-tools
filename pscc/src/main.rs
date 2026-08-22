@@ -18,7 +18,7 @@ use pex::{Class, Module, NamedFunction, State, StringKey, StringTable};
 
 use crate::ast::Ast;
 use crate::codegen::CodegenOptions;
-use crate::registry::{ClassInfo, Registry};
+use crate::registry::{ClassInfo, Registry, StructInfo};
 
 #[derive(Clone, Debug, Parser)]
 struct Args {
@@ -86,6 +86,19 @@ fn main() -> ExitCode {
             for prop in &group.properties {
                 info.properties.insert(prop.name.clone(), prop.ty.clone());
             }
+        }
+
+        for st in &ast.structs {
+            registry.structs.insert(
+                st.name.clone(),
+                StructInfo {
+                    members: st
+                        .members
+                        .iter()
+                        .map(|def| (def.name.clone(), def.ty.clone()))
+                        .collect(),
+                },
+            );
         }
 
         registry.classes.insert(ast.script_name.clone(), info);
