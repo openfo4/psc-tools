@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use crate::ast::{Expr, Type};
+use crate::ast::{Expr, Spanned, Type};
 use crate::lexer::{Literal, Token, TokenKind};
 use crate::parser::{Error, ErrorKind, IdentKeyword, Keyword, ParseToken, Parser};
 
@@ -15,7 +15,7 @@ const LEADING_TOKEN: &[ParseToken] = &[
 ];
 
 impl<'a> Parser<'a> {
-    pub fn parse_expr(&mut self) -> Result<Expr, Error<'a>> {
+    pub fn parse_expr(&mut self) -> Result<Spanned<Expr>, Error<'a>> {
         let mut stacks = vec![ExprParseStack::new(0..0)];
 
         while let Some(token) = self.peek() {
@@ -44,13 +44,15 @@ impl<'a> Parser<'a> {
                     {
                         self.consume_next(&[ParseToken::Token(&TokenKind::OpenBracket)])?;
 
+                        let span = token.span.start..ty.span.end;
                         stacks.push(ExprParseStack::new_with_parent(
                             token.span.clone(),
-                            Parent::NewArray(ty),
+                            Parent::NewArray(ty, span),
                         ));
                         continue;
                     } else {
-                        stack.shift(ExprOrToken::Expr(Expr::New { ty }));
+                        let span = token.span.start..ty.span.end;
+                        stack.shift(ExprOrToken::Expr(Spanned::new(span, Expr::New { ty })));
                     }
                 }
                 _ if token.keyword() == Some(Keyword::As) => {
@@ -74,10 +76,14 @@ impl<'a> Parser<'a> {
                     };
 
                     let ty = self.parse_inline_type()?;
-                    stack.shift(ExprOrToken::Expr(Expr::Cast {
-                        lhs: Box::new(lhs),
-                        rhs: ty,
-                    }));
+                    let span = lhs.span.start..ty.span.end;
+                    stack.shift(ExprOrToken::Expr(Spanned::new(
+                        span,
+                        Expr::Cast {
+                            lhs: Box::new(lhs),
+                            rhs: ty,
+                        },
+                    )));
                 }
                 _ if token.keyword() == Some(Keyword::Is) => {
                     if stack.ends_with_ident() {
@@ -100,10 +106,14 @@ impl<'a> Parser<'a> {
                     };
 
                     let ty = self.parse_inline_type()?;
-                    stack.shift(ExprOrToken::Expr(Expr::Is {
-                        lhs: Box::new(lhs),
-                        rhs: ty,
-                    }));
+                    let span = lhs.span.start..ty.span.end;
+                    stack.shift(ExprOrToken::Expr(Spanned::new(
+                        span,
+                        Expr::Is {
+                            lhs: Box::new(lhs),
+                            rhs: ty,
+                        },
+                    )));
                 }
                 TokenKind::OpenBracket => {
                     if stack.ends_with_ident() {
@@ -127,7 +137,7 @@ impl<'a> Parser<'a> {
 
                     stacks.push(ExprParseStack::new_with_parent(
                         token.span.clone(),
-                        Parent::Index { array },
+                        Parent::Index(array),
                     ));
                     continue;
                 }
@@ -139,14 +149,26 @@ impl<'a> Parser<'a> {
                     stack = stacks.last_mut().unwrap();
 
                     let expr = match parent {
-                        Some(Parent::Index { array }) => ExprOrToken::Expr(Expr::Index {
-                            array: Box::new(array),
-                            index: Box::new(expr),
-                        }),
-                        Some(Parent::NewArray(ty)) => ExprOrToken::Expr(Expr::NewArray {
-                            ty,
-                            len: Box::new(expr),
-                        }),
+                        Some(Parent::Index(array)) => {
+                            let span = array.span.start..token.span.end;
+                            ExprOrToken::Expr(Spanned::new(
+                                span,
+                                Expr::Index {
+                                    array: Box::new(array),
+                                    index: Box::new(expr),
+                                },
+                            ))
+                        }
+                        Some(Parent::NewArray(ty, span)) => {
+                            let span = span.start..token.span.end;
+                            ExprOrToken::Expr(Spanned::new(
+                                span,
+                                Expr::NewArray {
+                                    ty,
+                                    len: Box::new(expr),
+                                },
+                            ))
+                        }
                         _ => {
                             todo!();
                         }
@@ -184,7 +206,12 @@ impl<'a> Parser<'a> {
 
                         let callee = Box::new(stack.stack.pop().unwrap().into_expr().unwrap());
                         let args = core::mem::take(&mut stack.call_params);
-                        stack.shift(ExprOrToken::Expr(Expr::Call { callee, args }));
+
+                        let span = callee.span.start..token.span.end;
+                        stack.shift(ExprOrToken::Expr(Spanned::new(
+                            span,
+                            Expr::Call { callee, args },
+                        )));
                     } else {
                         let Some(expr) = expr else {
                             return Err(Error {
@@ -209,7 +236,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 _ => {
-                    stack.shift(ExprOrToken::Token(&token.kind));
+                    stack.shift(ExprOrToken::Token(&token));
                 }
             }
 
@@ -237,25 +264,33 @@ impl<'a> Parser<'a> {
 
 #[derive(Clone, Debug)]
 enum ExprOrToken<'a> {
-    Token(&'a TokenKind<'a>),
-    Expr(Expr),
+    Token(&'a Token<'a>),
+    Expr(Spanned<Expr>),
 }
 
 impl ExprOrToken<'_> {
-    fn into_expr(self) -> Option<Expr> {
+    fn into_expr(self) -> Option<Spanned<Expr>> {
         match self {
             Self::Expr(expr) => Some(expr),
-            Self::Token(TokenKind::Ident(ident)) => Some(Expr::Ident {
-                ident: ident.to_string(),
-            }),
-            Self::Token(TokenKind::Literal(literal)) => Some(match literal {
-                Literal::None => Expr::Literal(Literal::None),
-                Literal::Bool(v) => Expr::Literal(Literal::Bool(*v)),
-                Literal::NumberInt(lit) => Expr::Literal(Literal::NumberInt(*lit)),
-                Literal::NumberDecimal(lit) => Expr::Literal(Literal::NumberDecimal(*lit)),
-                Literal::String(lit) => Expr::Literal(Literal::String(Cow::Owned(lit.to_string()))),
-            }),
-            _ => None,
+            Self::Token(token) => {
+                let expr = match &token.kind {
+                    TokenKind::Ident(ident) => Expr::Ident {
+                        ident: ident.to_string(),
+                    },
+                    TokenKind::Literal(literal) => match literal {
+                        Literal::None => Expr::Literal(Literal::None),
+                        Literal::Bool(v) => Expr::Literal(Literal::Bool(*v)),
+                        Literal::NumberInt(lit) => Expr::Literal(Literal::NumberInt(*lit)),
+                        Literal::NumberDecimal(lit) => Expr::Literal(Literal::NumberDecimal(*lit)),
+                        Literal::String(lit) => {
+                            Expr::Literal(Literal::String(Cow::Owned(lit.to_string())))
+                        }
+                    },
+                    _ => return None,
+                };
+
+                Some(Spanned::new(token.span.clone(), expr))
+            }
         }
     }
 }
@@ -263,7 +298,7 @@ impl ExprOrToken<'_> {
 #[derive(Clone, Debug)]
 struct ExprParseStack<'a> {
     stack: Vec<ExprOrToken<'a>>,
-    call_params: Vec<Expr>,
+    call_params: Vec<Spanned<Expr>>,
     ends_with_call: bool,
     /// The position of the token that "opened" this subexpression.
     opened: Range<usize>,
@@ -386,13 +421,13 @@ impl<'a> ExprParseStack<'a> {
 
         let expect = op.operator();
 
-        **token == expect
+        token.kind == expect
     }
 
     fn ends_with_ident(&self) -> bool {
         match self.stack.last() {
             Some(ExprOrToken::Expr(_)) => true,
-            Some(ExprOrToken::Token(TokenKind::Ident(_))) => true,
+            Some(ExprOrToken::Token(token)) if matches!(token.kind, TokenKind::Ident(_)) => true,
             _ => false,
         }
     }
@@ -401,62 +436,70 @@ impl<'a> ExprParseStack<'a> {
         let expr = match op {
             Op::Neg | Op::LogicalNot => {
                 let value = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
-                let op = self.stack.pop().unwrap();
+                let ExprOrToken::Token(op) = self.stack.pop().unwrap() else {
+                    todo!();
+                };
 
-                match op {
-                    ExprOrToken::Token(TokenKind::Minus) => Expr::Neg { value },
-                    ExprOrToken::Token(TokenKind::Bang) => Expr::LogicalNot { value },
+                let span = op.span.start..value.span.end;
+
+                let expr = match &op.kind {
+                    TokenKind::Minus => Expr::Neg { value },
+                    TokenKind::Bang => Expr::LogicalNot { value },
                     _ => todo!(),
-                }
+                };
+
+                Spanned::new(span, expr)
             }
             _ => {
                 let rhs = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
                 let op = self.stack.pop().unwrap();
                 let lhs = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
+                let ExprOrToken::Token(op) = op else {
+                    todo!();
+                };
 
-                match op {
-                    ExprOrToken::Token(TokenKind::Plus) => Expr::Add { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Minus) => Expr::Sub { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Star) => Expr::Mul { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Slash) => Expr::Div { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Percent) => Expr::Rem { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Dot) => Expr::Deref { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Eq) => Expr::Assign { src: rhs, dst: lhs },
-                    ExprOrToken::Token(TokenKind::PlusEq) => Expr::AddAssign { src: rhs, dst: lhs },
-                    ExprOrToken::Token(TokenKind::MinusEq) => {
-                        Expr::SubAssign { src: rhs, dst: lhs }
-                    }
-                    ExprOrToken::Token(TokenKind::StarEq) => Expr::MulAssign { src: rhs, dst: lhs },
-                    ExprOrToken::Token(TokenKind::SlashEq) => {
-                        Expr::DivAssign { src: rhs, dst: lhs }
-                    }
-                    ExprOrToken::Token(TokenKind::PercentEq) => {
-                        Expr::RemAssign { src: rhs, dst: lhs }
-                    }
-                    ExprOrToken::Token(TokenKind::LogicalAnd) => Expr::LogicalAnd { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::LogicalOr) => Expr::LogicalOr { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::EqEq) => Expr::CmpEq { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::BangEq) => Expr::CmpNe { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Gt) => Expr::CmpGt { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::GtEq) => Expr::CmpGe { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::Lt) => Expr::CmpLt { lhs, rhs },
-                    ExprOrToken::Token(TokenKind::LtEq) => Expr::CmpLe { lhs, rhs },
+                let span = lhs.span.start..rhs.span.end;
+
+                let expr = match &op.kind {
+                    TokenKind::Plus => Expr::Add { lhs, rhs },
+                    TokenKind::Minus => Expr::Sub { lhs, rhs },
+                    TokenKind::Star => Expr::Mul { lhs, rhs },
+                    TokenKind::Slash => Expr::Div { lhs, rhs },
+                    TokenKind::Percent => Expr::Rem { lhs, rhs },
+                    TokenKind::Dot => Expr::Deref { lhs, rhs },
+                    TokenKind::Eq => Expr::Assign { src: rhs, dst: lhs },
+                    TokenKind::PlusEq => Expr::AddAssign { src: rhs, dst: lhs },
+                    TokenKind::MinusEq => Expr::SubAssign { src: rhs, dst: lhs },
+                    TokenKind::StarEq => Expr::MulAssign { src: rhs, dst: lhs },
+                    TokenKind::SlashEq => Expr::DivAssign { src: rhs, dst: lhs },
+                    TokenKind::PercentEq => Expr::RemAssign { src: rhs, dst: lhs },
+                    TokenKind::LogicalAnd => Expr::LogicalAnd { lhs, rhs },
+                    TokenKind::LogicalOr => Expr::LogicalOr { lhs, rhs },
+                    TokenKind::EqEq => Expr::CmpEq { lhs, rhs },
+                    TokenKind::BangEq => Expr::CmpNe { lhs, rhs },
+                    TokenKind::Gt => Expr::CmpGt { lhs, rhs },
+                    TokenKind::GtEq => Expr::CmpGe { lhs, rhs },
+                    TokenKind::Lt => Expr::CmpLt { lhs, rhs },
+                    TokenKind::LtEq => Expr::CmpLe { lhs, rhs },
                     x => todo!("{:?}", x),
-                }
+                };
+
+                Spanned::new(span, expr)
             }
         };
 
         self.stack.push(ExprOrToken::Expr(expr));
     }
 
-    fn finalize<'b>(mut self, next: &'b Token<'_>) -> Result<Expr, Error<'b>> {
+    fn finalize<'b>(mut self, next: &'b Token<'_>) -> Result<Spanned<Expr>, Error<'b>> {
         self.reduce(&TokenKind::Eol);
 
         if let Some(s) = self.stack.pop_if(|e| {
-            matches!(
-                e,
-                ExprOrToken::Token(TokenKind::Ident(_) | TokenKind::Literal(_))
-            )
+            if let ExprOrToken::Token(token) = e {
+                matches!(token.kind, TokenKind::Ident(_) | TokenKind::Literal(_))
+            } else {
+                false
+            }
         }) {
             self.stack.push(ExprOrToken::Expr(s.into_expr().unwrap()));
         }
@@ -483,8 +526,8 @@ impl<'a> ExprParseStack<'a> {
 
 #[derive(Clone, Debug)]
 enum Parent {
-    Index { array: Expr },
-    NewArray(Type),
+    Index(Spanned<Expr>),
+    NewArray(Spanned<Type>, Range<usize>),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -574,7 +617,7 @@ fn is_expr_terminator(token: &Token<'_>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Expr, Type};
+    use crate::ast::{Expr, Spanned, Type};
     use crate::lexer::{Token, TokenKind};
     use crate::parser::Parser;
 
@@ -594,11 +637,11 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Neg {
-                value: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Neg {
+                value: Box::new(Spanned::erased(Expr::Ident {
                     ident: "x".to_owned()
-                })
-            }
+                }))
+            })
         );
     }
 
@@ -616,16 +659,16 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Sub {
-                lhs: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Sub {
+                lhs: Box::new(Spanned::erased(Expr::Ident {
                     ident: "x".to_owned()
-                }),
-                rhs: Box::new(Expr::Neg {
-                    value: Box::new(Expr::Ident {
+                })),
+                rhs: Box::new(Spanned::erased(Expr::Neg {
+                    value: Box::new(Spanned::erased(Expr::Ident {
                         ident: "y".to_owned()
-                    })
-                })
-            }
+                    }))
+                }))
+            })
         );
     }
 
@@ -644,19 +687,19 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Assign {
-                src: Box::new(Expr::Assign {
-                    src: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Assign {
+                src: Box::new(Spanned::erased(Expr::Assign {
+                    src: Box::new(Spanned::erased(Expr::Ident {
                         ident: "z".to_owned()
-                    }),
-                    dst: Box::new(Expr::Ident {
+                    })),
+                    dst: Box::new(Spanned::erased(Expr::Ident {
                         ident: "y".to_owned()
-                    })
-                }),
-                dst: Box::new(Expr::Ident {
+                    }))
+                })),
+                dst: Box::new(Spanned::erased(Expr::Ident {
                     ident: "x".to_owned()
-                })
-            }
+                }))
+            })
         );
     }
 
@@ -672,9 +715,9 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::New {
-                ty: Type::Ty("Type".to_owned())
-            }
+            Spanned::erased(Expr::New {
+                ty: Spanned::erased(Type::Ty("Type".to_owned()))
+            })
         );
     }
 
@@ -695,17 +738,17 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::NewArray {
-                ty: Type::Ty("Type".to_owned()),
-                len: Box::new(Expr::Add {
-                    lhs: Box::new(Expr::Ident {
+            Spanned::erased(Expr::NewArray {
+                ty: Spanned::erased(Type::Ty("Type".to_owned())),
+                len: Box::new(Spanned::erased(Expr::Add {
+                    lhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "x".to_owned()
-                    }),
-                    rhs: Box::new(Expr::Ident {
+                    })),
+                    rhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "y".to_owned()
-                    })
-                })
-            }
+                    }))
+                }))
+            })
         );
     }
 
@@ -725,19 +768,19 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Index {
-                array: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Index {
+                array: Box::new(Spanned::erased(Expr::Ident {
                     ident: "arr".to_owned()
-                }),
-                index: Box::new(Expr::Add {
-                    lhs: Box::new(Expr::Ident {
+                })),
+                index: Box::new(Spanned::erased(Expr::Add {
+                    lhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "x".to_owned()
-                    }),
-                    rhs: Box::new(Expr::Ident {
+                    })),
+                    rhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "y".to_owned()
-                    })
-                })
-            }
+                    }))
+                }))
+            })
         );
     }
 
@@ -756,14 +799,14 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Call {
-                callee: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Call {
+                callee: Box::new(Spanned::erased(Expr::Ident {
                     ident: "x".to_owned()
-                }),
-                args: vec![Expr::Ident {
+                })),
+                args: vec![Spanned::erased(Expr::Ident {
                     ident: "y".to_owned()
-                }]
-            }
+                })]
+            })
         );
         assert_eq!(parser.tokens[0], token(TokenKind::Comma));
     }
@@ -783,17 +826,17 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Call {
-                callee: Box::new(Expr::Deref {
-                    lhs: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Call {
+                callee: Box::new(Spanned::erased(Expr::Deref {
+                    lhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "x".to_owned()
-                    }),
-                    rhs: Box::new(Expr::Ident {
+                    })),
+                    rhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "y".to_owned()
-                    }),
-                }),
+                    })),
+                })),
                 args: Vec::new()
-            }
+            })
         );
     }
 
@@ -813,19 +856,19 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Index {
-                array: Box::new(Expr::Deref {
-                    lhs: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Index {
+                array: Box::new(Spanned::erased(Expr::Deref {
+                    lhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "x".to_owned()
-                    }),
-                    rhs: Box::new(Expr::Ident {
+                    })),
+                    rhs: Box::new(Spanned::erased(Expr::Ident {
                         ident: "y".to_owned()
-                    }),
-                }),
-                index: Box::new(Expr::Ident {
+                    })),
+                })),
+                index: Box::new(Spanned::erased(Expr::Ident {
                     ident: "z".to_owned()
-                })
-            }
+                }))
+            })
         );
     }
 
@@ -842,12 +885,12 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Cast {
-                lhs: Box::new(Expr::Ident {
+            Spanned::erased(Expr::Cast {
+                lhs: Box::new(Spanned::erased(Expr::Ident {
                     ident: "x".to_owned()
-                }),
-                rhs: Type::Int
-            }
+                })),
+                rhs: Spanned::erased(Type::Int)
+            })
         );
     }
 }

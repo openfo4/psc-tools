@@ -745,12 +745,12 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         }
         Expr::NewArray { ty, len } => {
             let len = load_place_expr(translator, len);
-            let dst = translator.create_value(Type::Array(Box::new(ty.clone())));
+            let dst = translator.create_value(Type::Array(Box::new((**ty).clone())));
             translator.push_ins(Instruction::ArrayAlloc(Unop { src: len, dst }));
             dst
         }
         Expr::New { ty } => {
-            let Type::Ty(ty) = ty else {
+            let Type::Ty(ty) = &**ty else {
                 unreachable!();
             };
 
@@ -764,7 +764,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
         }
         Expr::Cast { lhs, rhs } => {
             let src = load_place_expr(translator, lhs);
-            let dst = translator.create_value(rhs.clone());
+            let dst = translator.create_value((**rhs).clone());
             let TypeOrPlace::Type(src_ty) = translator.types[&src].clone() else {
                 unreachable!();
             };
@@ -773,7 +773,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 src,
                 dst,
                 src_ty,
-                dst_ty: rhs.clone(),
+                dst_ty: (**rhs).clone(),
             }));
             dst
         }
@@ -788,7 +788,7 @@ fn lower_expr(translator: &mut Tranlsator, expr: &Expr) -> Value {
                 src,
                 dst,
                 src_ty,
-                dst_ty: rhs.clone(),
+                dst_ty: (**rhs).clone(),
             }));
             dst
         }

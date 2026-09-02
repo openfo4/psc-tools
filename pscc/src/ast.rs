@@ -1,3 +1,5 @@
+use std::ops::{Deref, Range};
+
 use crate::lexer::Literal;
 
 #[derive(Clone, Debug)]
@@ -121,68 +123,145 @@ pub struct Variable {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
-    Ident { ident: String },
+    Ident {
+        ident: String,
+    },
     Literal(Literal<'static>),
-    Deref { lhs: Box<Expr>, rhs: Box<Expr> },
-    Call { callee: Box<Expr>, args: Vec<Expr> },
-    Neg { value: Box<Expr> },
-    Add { lhs: Box<Expr>, rhs: Box<Expr> },
-    Sub { lhs: Box<Expr>, rhs: Box<Expr> },
-    Mul { lhs: Box<Expr>, rhs: Box<Expr> },
-    Div { lhs: Box<Expr>, rhs: Box<Expr> },
-    Rem { lhs: Box<Expr>, rhs: Box<Expr> },
-    Assign { src: Box<Expr>, dst: Box<Expr> },
-    AddAssign { src: Box<Expr>, dst: Box<Expr> },
-    SubAssign { src: Box<Expr>, dst: Box<Expr> },
-    MulAssign { src: Box<Expr>, dst: Box<Expr> },
-    DivAssign { src: Box<Expr>, dst: Box<Expr> },
-    RemAssign { src: Box<Expr>, dst: Box<Expr> },
-    LogicalAnd { lhs: Box<Expr>, rhs: Box<Expr> },
-    LogicalOr { lhs: Box<Expr>, rhs: Box<Expr> },
-    LogicalNot { value: Box<Expr> },
-    CmpEq { lhs: Box<Expr>, rhs: Box<Expr> },
-    CmpNe { lhs: Box<Expr>, rhs: Box<Expr> },
-    CmpGt { lhs: Box<Expr>, rhs: Box<Expr> },
-    CmpGe { lhs: Box<Expr>, rhs: Box<Expr> },
-    CmpLt { lhs: Box<Expr>, rhs: Box<Expr> },
-    CmpLe { lhs: Box<Expr>, rhs: Box<Expr> },
-    NewArray { ty: Type, len: Box<Expr> },
-    New { ty: Type },
-    Index { array: Box<Expr>, index: Box<Expr> },
-    Cast { lhs: Box<Expr>, rhs: Type },
-    Is { lhs: Box<Expr>, rhs: Type },
-}
-
-#[derive(Clone, Debug)]
-pub struct Binop {
-    pub lhs: Expr,
-    pub rhs: Expr,
+    Deref {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    Call {
+        callee: Box<Spanned<Expr>>,
+        args: Vec<Spanned<Expr>>,
+    },
+    Neg {
+        value: Box<Spanned<Expr>>,
+    },
+    Add {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    Sub {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    Mul {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    Div {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    Rem {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    Assign {
+        src: Box<Spanned<Expr>>,
+        dst: Box<Spanned<Expr>>,
+    },
+    AddAssign {
+        src: Box<Spanned<Expr>>,
+        dst: Box<Spanned<Expr>>,
+    },
+    SubAssign {
+        src: Box<Spanned<Expr>>,
+        dst: Box<Spanned<Expr>>,
+    },
+    MulAssign {
+        src: Box<Spanned<Expr>>,
+        dst: Box<Spanned<Expr>>,
+    },
+    DivAssign {
+        src: Box<Spanned<Expr>>,
+        dst: Box<Spanned<Expr>>,
+    },
+    RemAssign {
+        src: Box<Spanned<Expr>>,
+        dst: Box<Spanned<Expr>>,
+    },
+    LogicalAnd {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    LogicalOr {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    LogicalNot {
+        value: Box<Spanned<Expr>>,
+    },
+    CmpEq {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    CmpNe {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    CmpGt {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    CmpGe {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    CmpLt {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    CmpLe {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Box<Spanned<Expr>>,
+    },
+    NewArray {
+        ty: Spanned<Type>,
+        len: Box<Spanned<Expr>>,
+    },
+    New {
+        ty: Spanned<Type>,
+    },
+    Index {
+        array: Box<Spanned<Expr>>,
+        index: Box<Spanned<Expr>>,
+    },
+    Cast {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Spanned<Type>,
+    },
+    Is {
+        lhs: Box<Spanned<Expr>>,
+        rhs: Spanned<Type>,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub struct Assign {
-    pub src: Expr,
-    pub dst: Expr,
+    pub src: Spanned<Expr>,
+    pub dst: Spanned<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     Define(Define),
-    Expr(Expr),
-    Return(Option<Expr>),
+    Expr(Spanned<Expr>),
+    Return(Option<Spanned<Expr>>),
     If {
         then_blocks: Vec<ConditionBlock>,
         else_block: Vec<Statement>,
     },
     While {
-        condition: Expr,
+        condition: Spanned<Expr>,
         then_block: Vec<Statement>,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConditionBlock {
-    pub condition: Expr,
+    pub condition: Spanned<Expr>,
     pub statements: Vec<Statement>,
 }
 
@@ -190,7 +269,7 @@ pub struct ConditionBlock {
 pub struct Define {
     pub ty: Type,
     pub name: String,
-    pub value: Option<Expr>,
+    pub value: Option<Spanned<Expr>>,
 }
 
 #[derive(Clone, Debug)]
@@ -203,4 +282,28 @@ pub struct Struct {
 pub struct State {
     pub name: String,
     pub functions: Vec<Function>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Spanned<T> {
+    pub span: Range<usize>,
+    pub value: T,
+}
+
+impl<T> Spanned<T> {
+    pub const fn new(span: Range<usize>, value: T) -> Self {
+        Self { span, value }
+    }
+
+    pub const fn erased(value: T) -> Self {
+        Self { span: 0..0, value }
+    }
+}
+
+impl<T> Deref for Spanned<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }

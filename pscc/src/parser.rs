@@ -7,8 +7,8 @@ use std::ops::Range;
 use std::str::FromStr;
 
 use crate::ast::{
-    Ast, ConditionBlock, Define, Expr, Function, Property, PropertyGroup, State, Statement, Struct,
-    Type,
+    Ast, ConditionBlock, Define, Expr, Function, Property, PropertyGroup, Spanned, State,
+    Statement, Struct, Type,
 };
 use crate::lexer::{Literal, Token, TokenKind};
 
@@ -345,22 +345,18 @@ impl<'a> Parser<'a> {
         Ok(ty)
     }
 
-    fn parse_inline_type(&mut self) -> Result<Type, Error<'a>> {
-        let ty = self.consume_ident()?;
-        let mut ty = Type::new(ty);
+    fn parse_inline_type(&mut self) -> Result<Spanned<Type>, Error<'a>> {
+        let ty = self.consume_ident_spanned()?;
+        let mut ty = Spanned::new(ty.span, Type::new(ty.value));
 
-        while self
-            .tokens
-            .get(0)
-            .is_some_and(|tok| tok.kind == TokenKind::OpenBracket)
-            && self
-                .tokens
-                .get(1)
-                .is_some_and(|tok| tok.kind == TokenKind::CloseBracket)
+        while let Some(start) = self.tokens.get(0)
+            && let Some(end) = self.tokens.get(1)
+            && start.kind == TokenKind::OpenBracket
+            && end.kind == TokenKind::CloseBracket
         {
             self.consume();
             self.consume();
-            ty = Type::Array(Box::new(ty));
+            ty = Spanned::new(ty.span.start..end.span.end, Type::Array(Box::new(ty.value)));
         }
 
         Ok(ty)
@@ -743,6 +739,24 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn consume_ident_spanned(&mut self) -> Result<Spanned<&'a str>, Error<'a>> {
+        let token = self.tokens.split_off_first().unwrap();
+
+        match token.kind {
+            TokenKind::Ident(id) => Ok(Spanned::new(token.span.clone(), id)),
+            // "none" can be both a type or a value depending on
+            // the context. Fun times.
+            TokenKind::Literal(Literal::None) => Ok(Spanned::new(token.span.clone(), "none")),
+            _ => Err(Error {
+                span: token.span.clone(),
+                kind: ErrorKind::UnexpectedToken {
+                    expected: &[ParseToken::Ident],
+                    found: token,
+                },
+            }),
+        }
+    }
+
     fn consume_next(
         &mut self,
         tokens: &'static [ParseToken<'static>],
@@ -971,7 +985,7 @@ struct Header {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Define, Expr, Statement, Type};
+    use crate::ast::{Define, Expr, Spanned, Statement, Type};
     use crate::lexer::{Token, TokenKind};
     use crate::parser::Parser;
 
@@ -1016,9 +1030,9 @@ mod tests {
             Statement::Define(Define {
                 ty: Type::Int,
                 name: "x".to_owned(),
-                value: Some(Expr::Ident {
+                value: Some(Spanned::erased(Expr::Ident {
                     ident: "y".to_owned()
-                })
+                }))
             })
         );
     }
