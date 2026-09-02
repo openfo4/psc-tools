@@ -24,13 +24,28 @@ pub enum ErrorKind<'a> {
         expected: &'static [ParseToken<'static>],
         found: &'a Token<'a>,
     },
+    UnclosedDelimiter {
+        opened: Range<usize>,
+    },
 }
 
 impl Display for ErrorKind<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnexpectedToken { expected, found } => {
-                write!(f, "expected one of: {:?}, found {:?}", expected, found)
+                debug_assert!(!expected.is_empty());
+
+                write!(f, "expected one of: ")?;
+
+                write!(f, "{}", expected[0])?;
+                for token in expected.iter().skip(1) {
+                    write!(f, ", {}", token)?;
+                }
+
+                write!(f, ", found {}", found.kind.as_class_str())
+            }
+            Self::UnclosedDelimiter { opened: _ } => {
+                write!(f, "unclosed delimiter")
             }
         }
     }
@@ -825,6 +840,45 @@ impl Keyword {
     pub const fn is_global_attribute(&self) -> bool {
         matches!(self, Self::Const)
     }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::ScriptName => "ScriptName",
+            Self::Extends => "extends",
+            Self::Default => "Default",
+            Self::Conditional => "Conditional",
+            Self::Mandatory => "Mandatory",
+            Self::Hidden => "Hidden",
+            Self::Optional => "Optional",
+            Self::State => "State",
+            Self::EndState => "EndState",
+            Self::Group => "Group",
+            Self::EndGroup => "EndGroup",
+            Self::Property => "Property",
+            Self::Auto => "auto",
+            Self::Const => "const",
+            Self::Function => "function",
+            Self::EndFunction => "endFunction",
+            Self::Event => "Event",
+            Self::EndEvent => "EndEvent",
+            Self::If => "if",
+            Self::Else => "else",
+            Self::ElseIf => "elseif",
+            Self::EndIf => "endif",
+            Self::While => "while",
+            Self::EndWhile => "endwhile",
+            Self::Return => "return",
+            Self::New => "new",
+            Self::Struct => "Struct",
+            Self::EndStruct => "EndStruct",
+            Self::Global => "global",
+            Self::Native => "native",
+            Self::DebugOnly => "DebugOnly",
+            Self::AutoReadOnly => "AutoReadOnly",
+            Self::As => "as",
+            Self::Is => "is",
+        }
+    }
 }
 
 impl FromStr for Keyword {
@@ -873,42 +927,7 @@ impl FromStr for Keyword {
 
 impl Display for Keyword {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ScriptName => f.write_str("ScriptName"),
-            Self::Extends => f.write_str("extends"),
-            Self::Default => f.write_str("Default"),
-            Self::Conditional => f.write_str("Conditional"),
-            Self::Mandatory => f.write_str("Mandatory"),
-            Self::Hidden => f.write_str("Hidden"),
-            Self::Optional => f.write_str("Optional"),
-            Self::State => f.write_str("State"),
-            Self::EndState => f.write_str("EndState"),
-            Self::Group => f.write_str("Group"),
-            Self::EndGroup => f.write_str("EndGroup"),
-            Self::Property => f.write_str("Property"),
-            Self::Auto => f.write_str("auto"),
-            Self::Const => f.write_str("const"),
-            Self::Function => f.write_str("function"),
-            Self::EndFunction => f.write_str("endFunction"),
-            Self::Event => f.write_str("Event"),
-            Self::EndEvent => f.write_str("EndEvent"),
-            Self::If => f.write_str("if"),
-            Self::Else => f.write_str("else"),
-            Self::ElseIf => f.write_str("elseif"),
-            Self::EndIf => f.write_str("endif"),
-            Self::While => f.write_str("while"),
-            Self::EndWhile => f.write_str("endwhile"),
-            Self::Return => f.write_str("return"),
-            Self::New => f.write_str("new"),
-            Self::Struct => f.write_str("Struct"),
-            Self::EndStruct => f.write_str("EndStruct"),
-            Self::Global => f.write_str("global"),
-            Self::Native => f.write_str("native"),
-            Self::DebugOnly => f.write_str("DebugOnly"),
-            Self::AutoReadOnly => f.write_str("AutoReadOnly"),
-            Self::As => f.write_str("as"),
-            Self::Is => f.write_str("is"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -918,6 +937,17 @@ enum ParseToken<'a> {
     Keyword(Keyword),
     Ident,
     Literal,
+}
+
+impl Display for ParseToken<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Token(token) => token.as_class_str(),
+            Self::Keyword(kw) => kw.as_str(),
+            Self::Ident => "identifier",
+            Self::Literal => "literal",
+        })
+    }
 }
 
 trait IdentKeyword {

@@ -193,7 +193,6 @@ impl<'a> Parser<'a> {
             });
         }
 
-        debug_assert_eq!(stacks.len(), 1);
         stacks.pop().unwrap().finalize(self.peek().unwrap())
     }
 }
@@ -414,12 +413,19 @@ impl<'a> ExprParseStack<'a> {
             self.stack.push(ExprOrToken::Expr(s.into_expr()));
         }
 
-        match self.stack.pop().unwrap() {
-            ExprOrToken::Expr(expr) => Ok(expr),
-            ExprOrToken::Token(_) => Err(Error {
+        match self.stack.pop() {
+            Some(ExprOrToken::Expr(expr)) => Ok(expr),
+            Some(ExprOrToken::Token(_)) => Err(Error {
                 span: next.span.clone(),
                 kind: ErrorKind::UnexpectedToken {
                     expected: &[ParseToken::Literal, ParseToken::Ident],
+                    found: next,
+                },
+            }),
+            None => Err(Error {
+                span: next.span.clone(),
+                kind: ErrorKind::UnexpectedToken {
+                    expected: LEADING_TOKEN,
                     found: next,
                 },
             }),

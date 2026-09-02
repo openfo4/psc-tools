@@ -70,6 +70,42 @@ pub enum TokenKind<'a> {
     Eol,
 }
 
+impl TokenKind<'_> {
+    pub const fn as_class_str(&self) -> &'static str {
+        match self {
+            Self::Ident(_) => "identifier",
+            Self::Literal(_) => "literal",
+            Self::LogicalAnd => "`&&`",
+            Self::LogicalOr => "`||`",
+            Self::OpenParen => "`(`",
+            Self::CloseParen => "`)`",
+            Self::OpenBracket => "`[`",
+            Self::CloseBracket => "`]`",
+            Self::Plus => "`+`",
+            Self::Minus => "`-`",
+            Self::Star => "`*`",
+            Self::Slash => "`/`",
+            Self::Percent => "`%`",
+            Self::Dot => "`.`",
+            Self::Comma => "`,`",
+            Self::Eq => "`=`",
+            Self::BangEq => "`!=`",
+            Self::EqEq => "`==`",
+            Self::Gt => "`>`",
+            Self::GtEq => "`>=`",
+            Self::Lt => "`<`",
+            Self::LtEq => "`<=`",
+            Self::Bang => "`!`",
+            Self::PlusEq => "`+=`",
+            Self::MinusEq => "`-=`",
+            Self::StarEq => "`*=`",
+            Self::SlashEq => "`/=`",
+            Self::PercentEq => "`%=`",
+            Self::Eol => "end of line",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal<'a> {
     None,
