@@ -1,12 +1,22 @@
 use std::borrow::Cow;
+use std::ops::Range;
 
 use crate::ast::{Expr, Type};
 use crate::lexer::{Literal, Token, TokenKind};
-use crate::parser::{Error, IdentKeyword, Keyword, ParseToken, Parser};
+use crate::parser::{Error, ErrorKind, IdentKeyword, Keyword, ParseToken, Parser};
+
+/// A token that can be used in a leading position (first token in an expression).
+const LEADING_TOKEN: &[ParseToken] = &[
+    ParseToken::Ident,
+    ParseToken::Literal,
+    ParseToken::Token(&TokenKind::Bang),
+    ParseToken::Token(&TokenKind::Minus),
+    ParseToken::Keyword(Keyword::New),
+];
 
 impl<'a> Parser<'a> {
     pub fn parse_expr(&mut self) -> Result<Expr, Error<'a>> {
-        let mut stacks = vec![ExprParseStack::default()];
+        let mut stacks = vec![ExprParseStack::new(0..0)];
 
         while let Some(token) = self.peek() {
             // Some tokens are only allowed in an interior place as part of an expression
@@ -35,7 +45,7 @@ impl<'a> Parser<'a> {
                         self.consume_next(&[ParseToken::Token(&TokenKind::OpenBracket)])?;
                         stack.new_op = Some(ty);
 
-                        stacks.push(ExprParseStack::default());
+                        stacks.push(ExprParseStack::new(token.span.clone()));
                         continue;
                     } else {
                         stack.shift(ExprOrToken::Expr(Expr::New { ty }));
@@ -84,7 +94,7 @@ impl<'a> Parser<'a> {
                             stack.reduce_top(Op::Deref);
                         }
                     }
-                    stacks.push(ExprParseStack::default());
+                    stacks.push(ExprParseStack::new(token.span.clone()));
                     continue;
                 }
                 TokenKind::CloseBracket => {
@@ -116,7 +126,7 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    stacks.push(ExprParseStack::default());
+                    stacks.push(ExprParseStack::new(token.span.clone()));
                     continue;
                 }
                 TokenKind::CloseParen => {
@@ -138,7 +148,16 @@ impl<'a> Parser<'a> {
                         let args = core::mem::take(&mut stack.call_params);
                         stack.shift(ExprOrToken::Expr(Expr::Call { callee, args }));
                     } else {
-                        let expr = expr.unwrap();
+                        let Some(expr) = expr else {
+                            return Err(Error {
+                                span: token.span.clone(),
+                                kind: ErrorKind::UnexpectedToken {
+                                    expected: LEADING_TOKEN,
+                                    found: token,
+                                },
+                            });
+                        };
+
                         stack.shift(ExprOrToken::Expr(expr));
                     }
                 }
@@ -148,7 +167,7 @@ impl<'a> Parser<'a> {
                     stack = stacks.last_mut().unwrap();
                     stack.call_params.push(expr);
 
-                    stacks.push(ExprParseStack::default());
+                    stacks.push(ExprParseStack::new(token.span.clone()));
                     continue;
                 }
                 _ => {
@@ -161,6 +180,17 @@ impl<'a> Parser<'a> {
                 .map(|token| &token.kind)
                 .unwrap_or(&TokenKind::Eol);
             stack.reduce(next);
+        }
+
+        if stacks.len() != 1 {
+            let last = stacks.last().unwrap();
+
+            return Err(Error {
+                span: last.opened.clone(),
+                kind: ErrorKind::UnclosedDelimiter {
+                    opened: last.opened.clone(),
+                },
+            });
         }
 
         debug_assert_eq!(stacks.len(), 1);
@@ -193,15 +223,27 @@ impl ExprOrToken<'_> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct ExprParseStack<'a> {
     stack: Vec<ExprOrToken<'a>>,
     call_params: Vec<Expr>,
     ends_with_call: bool,
     new_op: Option<Type>,
+    /// The position of the token that "opened" this subexpression.
+    opened: Range<usize>,
 }
 
 impl<'a> ExprParseStack<'a> {
+    fn new(opened: Range<usize>) -> Self {
+        Self {
+            stack: Vec::new(),
+            call_params: Vec::new(),
+            ends_with_call: false,
+            new_op: None,
+            opened,
+        }
+    }
+
     fn shift(&mut self, next: ExprOrToken<'a>) {
         self.stack.push(next);
     }
@@ -376,7 +418,7 @@ impl<'a> ExprParseStack<'a> {
             ExprOrToken::Expr(expr) => Ok(expr),
             ExprOrToken::Token(_) => Err(Error {
                 span: next.span.clone(),
-                kind: super::ErrorKind::UnexpectedToken {
+                kind: ErrorKind::UnexpectedToken {
                     expected: &[ParseToken::Literal, ParseToken::Ident],
                     found: next,
                 },
