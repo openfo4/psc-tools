@@ -88,7 +88,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 TokenKind::CloseBracket => {
-                    let expr = stacks.pop().unwrap().finalize();
+                    let expr = stacks.pop().unwrap().finalize(token)?;
 
                     stack = stacks.last_mut().unwrap();
 
@@ -122,7 +122,8 @@ impl<'a> Parser<'a> {
                 TokenKind::CloseParen => {
                     let expr = stacks
                         .pop()
-                        .and_then(|stack| (!stack.stack.is_empty()).then(|| stack.finalize()));
+                        .and_then(|stack| (!stack.stack.is_empty()).then(|| stack.finalize(token)))
+                        .transpose()?;
 
                     stack = stacks.last_mut().unwrap();
 
@@ -142,7 +143,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokenKind::Comma => {
-                    let expr = stacks.pop().unwrap().finalize();
+                    let expr = stacks.pop().unwrap().finalize(token)?;
 
                     stack = stacks.last_mut().unwrap();
                     stack.call_params.push(expr);
@@ -163,7 +164,7 @@ impl<'a> Parser<'a> {
         }
 
         debug_assert_eq!(stacks.len(), 1);
-        Ok(stacks.pop().unwrap().finalize())
+        stacks.pop().unwrap().finalize(self.peek().unwrap())
     }
 }
 
@@ -359,7 +360,7 @@ impl<'a> ExprParseStack<'a> {
         self.stack.push(ExprOrToken::Expr(expr));
     }
 
-    fn finalize(mut self) -> Expr {
+    fn finalize<'b>(mut self, next: &'b Token<'_>) -> Result<Expr, Error<'b>> {
         self.reduce(&TokenKind::Eol);
 
         if let Some(s) = self.stack.pop_if(|e| {
@@ -372,8 +373,14 @@ impl<'a> ExprParseStack<'a> {
         }
 
         match self.stack.pop().unwrap() {
-            ExprOrToken::Expr(expr) => expr,
-            _ => unreachable!(),
+            ExprOrToken::Expr(expr) => Ok(expr),
+            ExprOrToken::Token(_) => Err(Error {
+                span: next.span.clone(),
+                kind: super::ErrorKind::UnexpectedToken {
+                    expected: &[ParseToken::Literal, ParseToken::Ident],
+                    found: next,
+                },
+            }),
         }
     }
 }
@@ -528,6 +535,7 @@ mod tests {
             token(TokenKind::Ident("y")),
             token(TokenKind::Eq),
             token(TokenKind::Ident("z")),
+            token(TokenKind::Eol),
         ];
         let mut parser = Parser::new(&tokens);
         let expr = parser.parse_expr().unwrap();
@@ -608,6 +616,7 @@ mod tests {
             token(TokenKind::Plus),
             token(TokenKind::Ident("y")),
             token(TokenKind::CloseBracket),
+            token(TokenKind::Eol),
         ];
         let mut parser = Parser::new(&tokens);
         let expr = parser.parse_expr().unwrap();
