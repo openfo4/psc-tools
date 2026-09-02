@@ -231,6 +231,9 @@ pub fn ssa_to_reg(
                     src_ty: op.src_ty.clone(),
                     dst_ty: op.dst_ty.clone(),
                 }),
+                Instruction::GetSelf { dst } => Instruction::GetSelf {
+                    dst: regs.alloc(*dst),
+                },
             };
 
             instructions.push(out);
@@ -452,5 +455,6 @@ where
         Instruction::Is(op) => {
             f(op.src);
         }
+        Instruction::GetSelf { dst: _ } => {}
     }
 }

@@ -250,6 +250,9 @@ where
                     Instruction::Is(op) => {
                         writeln!(f, "{} = is {} {} {}", op.dst, op.src, op.src_ty, op.dst_ty)?;
                     }
+                    Instruction::GetSelf { dst } => {
+                        writeln!(f, "{} = get_self", dst)?;
+                    }
                 }
             }
         }
@@ -390,6 +393,9 @@ impl DataFlowGraph {
                     Instruction::Is(op) => {
                         uses.entry(op.src).or_default().push(loc);
                         defs.insert(op.dst, loc);
+                    }
+                    Instruction::GetSelf { dst } => {
+                        defs.insert(*dst, loc);
                     }
                 }
             }

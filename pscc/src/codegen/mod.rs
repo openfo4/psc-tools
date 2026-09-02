@@ -59,6 +59,7 @@ pub enum Instruction<T> {
     StructStore(StructStore<T>),
     StructAlloc(T),
     Is(Is<T>),
+    GetSelf { dst: T },
 }
 
 #[derive(Clone, Debug)]
@@ -214,6 +215,14 @@ impl<'a> Tranlsator<'a> {
                     match seg {
                         PathSegment::Local(local) => value = local,
                         PathSegment::Item(item) => {
+                            if item.eq_ignore_ascii_case("self") {
+                                let dst = self.create_value(Type::Ty(self.ast.script_name.clone()));
+                                self.push_ins(Instruction::GetSelf { dst });
+
+                                value = dst;
+                                continue;
+                            }
+
                             if let Some(global) = self.ast.globals.iter().find(|v| v.name == item) {
                                 let dst = self.create_value(global.ty.clone());
                                 self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));

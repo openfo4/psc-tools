@@ -284,6 +284,12 @@ pub fn lower_to_pex(func: &FuncInfo, strings: &mut StringBuilder) -> pex::Functi
                     class: strings.insert(&op.dst_ty.to_string()),
                     return_assignment: Value::Ident(reg_names[&op.dst]),
                 }),
+                Instruction::GetSelf { dst } => {
+                    pexins::Instruction::Store(pex::instruction::Unop {
+                        src: Value::Ident(strings.insert("self")),
+                        dst: Value::Ident(reg_names[dst]),
+                    })
+                }
             };
             instructions.push(out);
         }
