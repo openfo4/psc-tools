@@ -43,9 +43,11 @@ impl<'a> Parser<'a> {
                         .is_some_and(|tok| tok.kind == TokenKind::OpenBracket)
                     {
                         self.consume_next(&[ParseToken::Token(&TokenKind::OpenBracket)])?;
-                        stack.new_op = Some(ty);
 
-                        stacks.push(ExprParseStack::new(token.span.clone()));
+                        stacks.push(ExprParseStack::new_with_parent(
+                            token.span.clone(),
+                            Parent::NewArray(ty),
+                        ));
                         continue;
                     } else {
                         stack.shift(ExprOrToken::Expr(Expr::New { ty }));
@@ -61,7 +63,16 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    let lhs = stack.stack.pop().unwrap().into_expr();
+                    let Some(lhs) = stack.stack.pop().and_then(|e| e.into_expr()) else {
+                        return Err(Error {
+                            span: token.span.clone(),
+                            kind: ErrorKind::UnexpectedToken {
+                                expected: LEADING_TOKEN,
+                                found: token,
+                            },
+                        });
+                    };
+
                     let ty = self.parse_inline_type()?;
                     stack.shift(ExprOrToken::Expr(Expr::Cast {
                         lhs: Box::new(lhs),
@@ -78,7 +89,16 @@ impl<'a> Parser<'a> {
                         }
                     }
 
-                    let lhs = stack.stack.pop().unwrap().into_expr();
+                    let Some(lhs) = stack.stack.pop().and_then(|e| e.into_expr()) else {
+                        return Err(Error {
+                            span: token.span.clone(),
+                            kind: ErrorKind::UnexpectedToken {
+                                expected: LEADING_TOKEN,
+                                found: token,
+                            },
+                        });
+                    };
+
                     let ty = self.parse_inline_type()?;
                     stack.shift(ExprOrToken::Expr(Expr::Is {
                         lhs: Box::new(lhs),
@@ -94,27 +114,45 @@ impl<'a> Parser<'a> {
                             stack.reduce_top(Op::Deref);
                         }
                     }
-                    stacks.push(ExprParseStack::new(token.span.clone()));
+
+                    let Some(array) = stack.stack.pop().and_then(|e| e.into_expr()) else {
+                        return Err(Error {
+                            span: token.span.clone(),
+                            kind: ErrorKind::UnexpectedToken {
+                                expected: LEADING_TOKEN,
+                                found: token,
+                            },
+                        });
+                    };
+
+                    stacks.push(ExprParseStack::new_with_parent(
+                        token.span.clone(),
+                        Parent::Index { array },
+                    ));
                     continue;
                 }
                 TokenKind::CloseBracket => {
-                    let expr = stacks.pop().unwrap().finalize(token)?;
+                    let mut substack = stacks.pop().unwrap();
+                    let parent = substack.parent.take();
+                    let expr = substack.finalize(token)?;
 
                     stack = stacks.last_mut().unwrap();
 
-                    if let Some(ty) = stack.new_op.take() {
-                        stack.shift(ExprOrToken::Expr(Expr::NewArray {
-                            ty,
-                            len: Box::new(expr),
-                        }));
-                    } else {
-                        let array = stack.stack.pop().unwrap().into_expr();
-
-                        stack.shift(ExprOrToken::Expr(Expr::Index {
+                    let expr = match parent {
+                        Some(Parent::Index { array }) => ExprOrToken::Expr(Expr::Index {
                             array: Box::new(array),
                             index: Box::new(expr),
-                        }));
-                    }
+                        }),
+                        Some(Parent::NewArray(ty)) => ExprOrToken::Expr(Expr::NewArray {
+                            ty,
+                            len: Box::new(expr),
+                        }),
+                        _ => {
+                            todo!();
+                        }
+                    };
+
+                    stack.shift(expr);
                 }
                 TokenKind::OpenParen => {
                     if stack.ends_with_ident() {
@@ -144,7 +182,7 @@ impl<'a> Parser<'a> {
 
                         stack.ends_with_call = false;
 
-                        let callee = Box::new(stack.stack.pop().unwrap().into_expr());
+                        let callee = Box::new(stack.stack.pop().unwrap().into_expr().unwrap());
                         let args = core::mem::take(&mut stack.call_params);
                         stack.shift(ExprOrToken::Expr(Expr::Call { callee, args }));
                     } else {
@@ -204,20 +242,20 @@ enum ExprOrToken<'a> {
 }
 
 impl ExprOrToken<'_> {
-    fn into_expr(self) -> Expr {
+    fn into_expr(self) -> Option<Expr> {
         match self {
-            Self::Expr(expr) => expr,
-            Self::Token(TokenKind::Ident(ident)) => Expr::Ident {
+            Self::Expr(expr) => Some(expr),
+            Self::Token(TokenKind::Ident(ident)) => Some(Expr::Ident {
                 ident: ident.to_string(),
-            },
-            Self::Token(TokenKind::Literal(literal)) => match literal {
+            }),
+            Self::Token(TokenKind::Literal(literal)) => Some(match literal {
                 Literal::None => Expr::Literal(Literal::None),
                 Literal::Bool(v) => Expr::Literal(Literal::Bool(*v)),
                 Literal::NumberInt(lit) => Expr::Literal(Literal::NumberInt(*lit)),
                 Literal::NumberDecimal(lit) => Expr::Literal(Literal::NumberDecimal(*lit)),
                 Literal::String(lit) => Expr::Literal(Literal::String(Cow::Owned(lit.to_string()))),
-            },
-            _ => todo!(),
+            }),
+            _ => None,
         }
     }
 }
@@ -227,9 +265,9 @@ struct ExprParseStack<'a> {
     stack: Vec<ExprOrToken<'a>>,
     call_params: Vec<Expr>,
     ends_with_call: bool,
-    new_op: Option<Type>,
     /// The position of the token that "opened" this subexpression.
     opened: Range<usize>,
+    parent: Option<Parent>,
 }
 
 impl<'a> ExprParseStack<'a> {
@@ -238,8 +276,18 @@ impl<'a> ExprParseStack<'a> {
             stack: Vec::new(),
             call_params: Vec::new(),
             ends_with_call: false,
-            new_op: None,
             opened,
+            parent: None,
+        }
+    }
+
+    fn new_with_parent(opened: Range<usize>, parent: Parent) -> Self {
+        Self {
+            stack: Vec::new(),
+            call_params: Vec::new(),
+            ends_with_call: false,
+            opened,
+            parent: Some(parent),
         }
     }
 
@@ -352,7 +400,7 @@ impl<'a> ExprParseStack<'a> {
     fn reduce_top(&mut self, op: Op) {
         let expr = match op {
             Op::Neg | Op::LogicalNot => {
-                let value = Box::new(self.stack.pop().unwrap().into_expr());
+                let value = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
                 let op = self.stack.pop().unwrap();
 
                 match op {
@@ -362,9 +410,9 @@ impl<'a> ExprParseStack<'a> {
                 }
             }
             _ => {
-                let rhs = Box::new(self.stack.pop().unwrap().into_expr());
+                let rhs = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
                 let op = self.stack.pop().unwrap();
-                let lhs = Box::new(self.stack.pop().unwrap().into_expr());
+                let lhs = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
 
                 match op {
                     ExprOrToken::Token(TokenKind::Plus) => Expr::Add { lhs, rhs },
@@ -410,7 +458,7 @@ impl<'a> ExprParseStack<'a> {
                 ExprOrToken::Token(TokenKind::Ident(_) | TokenKind::Literal(_))
             )
         }) {
-            self.stack.push(ExprOrToken::Expr(s.into_expr()));
+            self.stack.push(ExprOrToken::Expr(s.into_expr().unwrap()));
         }
 
         match self.stack.pop() {
@@ -431,6 +479,12 @@ impl<'a> ExprParseStack<'a> {
             }),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+enum Parent {
+    Index { array: Expr },
+    NewArray(Type),
 }
 
 #[derive(Copy, Clone, Debug)]
