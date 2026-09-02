@@ -358,6 +358,7 @@ pub struct Variable {
     pub def: VariableDefinition,
     pub user_flags: u32,
     pub value: Value,
+    pub is_const: bool,
 }
 
 impl Encodable for Variable {
@@ -368,11 +369,13 @@ impl Encodable for Variable {
         let def = VariableDefinition::read(reader)?;
         let user_flags = u32::read(reader)?;
         let value = Value::read(reader)?;
+        let is_const = bool::read(reader)?;
 
         Ok(Self {
             def,
             user_flags,
             value,
+            is_const,
         })
     }
 
@@ -383,6 +386,7 @@ impl Encodable for Variable {
         self.def.write(writer);
         self.user_flags.write(writer);
         self.value.write(writer);
+        self.is_const.write(writer);
     }
 }
 

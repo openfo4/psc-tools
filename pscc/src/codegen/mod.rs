@@ -1127,6 +1127,7 @@ pub fn lower_property(
                 },
                 user_flags: 0,
                 value,
+                is_const: false,
             },
         );
     }
@@ -1154,6 +1155,7 @@ pub fn lower_global(global: &ast::Define, strings: &mut StringBuilder) -> pex::V
         },
         user_flags: 0,
         value,
+        is_const: false,
     }
 }
 
