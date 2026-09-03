@@ -38,6 +38,10 @@ pub enum ErrorKind<'a> {
     UnknownType {
         ty: Type,
     },
+    UnknownVarOrType {
+        name: &'a str,
+    },
+    NoPlace,
 }
 
 impl<'a> ErrorKind<'a> {
@@ -60,6 +64,8 @@ impl<'a> ErrorKind<'a> {
                 defined: _,
             } => "mismatched types",
             Self::UnknownType { ty: _ } => "unknown type used here",
+            Self::UnknownVarOrType { name: _ } => "unknown variable or type used here",
+            Self::NoPlace => "",
         }
     }
 
@@ -93,6 +99,8 @@ impl<'a> ErrorKind<'a> {
                 }
             }
             Self::UnknownType { ty: _ } => Vec::new(),
+            Self::UnknownVarOrType { name: _ } => Vec::new(),
+            Self::NoPlace => Vec::new(),
         }
     }
 }
@@ -135,6 +143,12 @@ impl Display for ErrorKind<'_> {
             }
             Self::UnknownType { ty } => {
                 write!(f, "cannot find type `{ty}` in scope")
+            }
+            Self::UnknownVarOrType { name } => {
+                write!(f, "cannot find variable or type `{name}` in scope")
+            }
+            Self::NoPlace => {
+                write!(f, "right-hand side must be a place expression")
             }
         }
     }
@@ -337,10 +351,10 @@ impl<'a> Visitor<'a> {
                     return Some(Spanned::new(span, TypeOrPlace::Type(def.ty.value.clone())));
                 }
 
-                Some(TypeOrPlace::Place(vec![Spanned::new(
-                    expr.span.clone(),
-                    ident,
-                )]))
+                Some(TypeOrPlace::Place(Place {
+                    prefix: None,
+                    segments: vec![Spanned::new(expr.span.clone(), ident)],
+                }))
             }
             Expr::Literal(literal) => match literal {
                 Literal::None => Some(TypeOrPlace::Type(Type::None)),
@@ -431,15 +445,27 @@ impl<'a> Visitor<'a> {
             Expr::Deref { lhs, rhs } => {
                 let lhs = self.visit_expr(lhs)?;
                 let rhs = self.visit_expr(rhs)?;
-                let (TypeOrPlace::Place(lhs), TypeOrPlace::Place(rhs)) = (lhs.value, rhs.value)
-                else {
-                    todo!();
+
+                let mut place = match lhs.value {
+                    TypeOrPlace::Type(ty) => Place {
+                        prefix: Some(ty),
+                        segments: Vec::new(),
+                    },
+                    TypeOrPlace::Place(place) => place,
                 };
 
-                let mut segs = lhs;
-                segs.extend(rhs);
+                let TypeOrPlace::Place(rhs) = rhs.value else {
+                    self.errors.push(Error {
+                        span: rhs.span.clone(),
+                        kind: ErrorKind::NoPlace,
+                    });
+                    return None;
+                };
 
-                Some(TypeOrPlace::Place(segs))
+                debug_assert!(rhs.prefix.is_none());
+                place.segments.extend(rhs.segments);
+
+                Some(TypeOrPlace::Place(place))
             }
             Expr::Call { callee, args } => {
                 let callee = self.visit_expr(callee)?;
@@ -575,9 +601,9 @@ impl<'a> Visitor<'a> {
     fn load_place(&mut self, place: Spanned<TypeOrPlace<'a>>) -> Option<Spanned<Type>> {
         match place.value {
             TypeOrPlace::Type(ty) => Some(Spanned::new(place.span, ty)),
-            TypeOrPlace::Place(segments) => {
-                debug_assert!(!segments.is_empty());
-                self.load_place_segments(&segments)
+            TypeOrPlace::Place(place) => {
+                debug_assert!(!place.segments.is_empty());
+                self.load_place_segments(place.prefix.as_ref(), &place.segments)
             }
         }
     }
@@ -585,17 +611,42 @@ impl<'a> Visitor<'a> {
     fn load_place_as_func(&mut self, place: TypeOrPlace<'a>) -> Option<&'a Function> {
         match place {
             TypeOrPlace::Type(_) => todo!(),
-            TypeOrPlace::Place(segments) => {
-                debug_assert!(!segments.is_empty());
+            TypeOrPlace::Place(place) => {
+                debug_assert!(!place.segments.is_empty());
 
-                let (func, path) = segments.split_last().unwrap();
+                let (func, path) = place.segments.split_last().unwrap();
                 let class = if !path.is_empty() {
-                    self.load_place_segments(path)?.value
+                    let first = path.first()?;
+
+                    match self.try_load_place_segments(place.prefix.as_ref(), path) {
+                        Ok(ty) => ty.value,
+                        Err(Some(seg)) if seg.span != first.span => {
+                            self.errors.push(Error {
+                                span: seg.span.clone(),
+                                kind: ErrorKind::UndeclaredVar { var: seg.value },
+                            });
+
+                            return None;
+                        }
+                        _ => {
+                            if !self.registry.classes.contains_key(first.value) {
+                                self.errors.push(Error {
+                                    span: first.span.clone(),
+                                    kind: ErrorKind::UnknownVarOrType { name: first.value },
+                                });
+
+                                return None;
+                            }
+
+                            Type::Ty(first.value.to_owned())
+                        }
+                    }
                 } else {
-                    Type::Ty(self.ast.script_name.clone())
+                    place
+                        .prefix
+                        .unwrap_or_else(|| Type::Ty(self.ast.script_name.clone()))
                 };
 
-                dbg!(&class);
                 if let Some(func) = self.registry.func(&class.to_string(), func.value) {
                     return Some(func);
                 }
@@ -613,19 +664,47 @@ impl<'a> Visitor<'a> {
         }
     }
 
-    fn load_place_segments(&mut self, segments: &[Spanned<&'a str>]) -> Option<Spanned<Type>> {
-        let mut ty;
-        let skip_first;
-        let seg = segments.get(0)?;
-        if let Some(def) = self.idents.get(seg.value)
-            && !seg.eq_ignore_ascii_case("self")
-        {
-            ty = def.ty.value.clone();
-            skip_first = true;
-        } else {
-            ty = Type::Ty(self.ast.script_name.clone());
-            skip_first = seg.eq_ignore_ascii_case("self");
-        }
+    fn load_place_segments(
+        &mut self,
+        prefix: Option<&Type>,
+        segments: &[Spanned<&'a str>],
+    ) -> Option<Spanned<Type>> {
+        self.try_load_place_segments(prefix, segments)
+            .inspect_err(|seg| {
+                if let Some(seg) = seg {
+                    self.errors.push(Error {
+                        span: seg.span.clone(),
+                        kind: ErrorKind::UndeclaredVar { var: seg.value },
+                    });
+                }
+            })
+            .ok()
+    }
+
+    fn try_load_place_segments(
+        &self,
+        prefix: Option<&Type>,
+        segments: &[Spanned<&'a str>],
+    ) -> Result<Spanned<Type>, Option<Spanned<&'a str>>> {
+        let (mut ty, skip_first) = match prefix {
+            Some(ty) => (ty.clone(), false),
+            None => {
+                let ty;
+                let skip_first;
+                let seg = segments.first().ok_or(None)?;
+                if let Some(def) = self.idents.get(seg.value)
+                    && !seg.eq_ignore_ascii_case("self")
+                {
+                    ty = def.ty.value.clone();
+                    skip_first = true;
+                } else {
+                    ty = Type::Ty(self.ast.script_name.clone());
+                    skip_first = seg.eq_ignore_ascii_case("self");
+                }
+
+                (ty, skip_first)
+            }
+        };
 
         for seg in segments.iter().skip(usize::from(skip_first)) {
             if let Some(global) = self.registry.global(&ty.to_string(), seg.value) {
@@ -643,16 +722,11 @@ impl<'a> Visitor<'a> {
                 continue;
             }
 
-            self.errors.push(Error {
-                span: seg.span.clone(),
-                kind: ErrorKind::UndeclaredVar { var: seg.value },
-            });
-
-            return None;
+            return Err(Some(Spanned::new(seg.span.clone(), seg.value)));
         }
 
         let span = segments.last().unwrap().span.clone();
-        Some(Spanned::new(span, ty))
+        Ok(Spanned::new(span, ty))
     }
 
     fn check_type_exists(&mut self, ty: &'a Spanned<Type>) -> bool {
@@ -694,5 +768,11 @@ pub enum Binop {
 #[derive(Clone, Debug)]
 enum TypeOrPlace<'a> {
     Type(Type),
-    Place(Vec<Spanned<&'a str>>),
+    Place(Place<'a>),
+}
+
+#[derive(Clone, Debug)]
+struct Place<'a> {
+    prefix: Option<Type>,
+    segments: Vec<Spanned<&'a str>>,
 }
