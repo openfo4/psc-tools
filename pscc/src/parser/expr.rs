@@ -293,6 +293,18 @@ impl ExprOrToken<'_> {
             }
         }
     }
+
+    /// Returns `true` if this is value-like expression.
+    const fn is_value(&self) -> bool {
+        match self {
+            Self::Expr(_) => true,
+            Self::Token(token) => match token.kind {
+                TokenKind::Ident(_) => true,
+                TokenKind::Literal(_) => true,
+                _ => false,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -434,7 +446,7 @@ impl<'a> ExprParseStack<'a> {
 
     fn reduce_top(&mut self, op: Op) {
         let expr = match op {
-            Op::Neg | Op::LogicalNot => {
+            Op::LogicalNot => {
                 let value = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
                 let ExprOrToken::Token(op) = self.stack.pop().unwrap() else {
                     todo!();
@@ -449,6 +461,29 @@ impl<'a> ExprParseStack<'a> {
                 };
 
                 Spanned::new(span, expr)
+            }
+            // Negation is sort-of special here because it shares an operator token
+            // with the subtraction operation.
+            // Negation has a higher precedence, however whenever possible we should
+            // reduce into a subtraction operation over a negation operation.
+            Op::Neg => {
+                let rhs = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
+                let ExprOrToken::Token(op) = self.stack.pop().unwrap() else {
+                    todo!();
+                };
+                let lhs = self.stack.pop_if(|lhs| lhs.is_value());
+
+                match lhs {
+                    Some(lhs) => {
+                        let lhs = Box::new(lhs.into_expr().unwrap());
+                        let span = lhs.span.start..rhs.span.end;
+                        Spanned::new(span, Expr::Sub { lhs, rhs })
+                    }
+                    None => {
+                        let span = op.span.start..rhs.span.end;
+                        Spanned::new(span, Expr::Neg { value: rhs })
+                    }
+                }
             }
             _ => {
                 let rhs = Box::new(self.stack.pop().unwrap().into_expr().unwrap());
@@ -890,6 +925,30 @@ mod tests {
                     ident: "x".to_owned()
                 })),
                 rhs: Spanned::erased(Type::Int)
+            })
+        );
+    }
+
+    #[test]
+    fn parse_sub_expr() {
+        let tokens = [
+            token(TokenKind::Ident("x")),
+            token(TokenKind::Minus),
+            token(TokenKind::Ident("y")),
+            token(TokenKind::Eol),
+        ];
+        let mut parser = Parser::new(&tokens);
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            Spanned::erased(Expr::Sub {
+                lhs: Box::new(Spanned::erased(Expr::Ident {
+                    ident: "x".to_owned()
+                })),
+                rhs: Box::new(Spanned::erased(Expr::Ident {
+                    ident: "y".to_owned()
+                }))
             })
         );
     }
