@@ -45,6 +45,9 @@ pub enum ErrorKind<'a> {
     InvalidNeg {
         ty: Type,
     },
+    IndexNonArray {
+        ty: Type,
+    },
 }
 
 impl<'a> ErrorKind<'a> {
@@ -70,6 +73,7 @@ impl<'a> ErrorKind<'a> {
             Self::UnknownVarOrType { name: _ } => "unknown variable or type used here",
             Self::NoPlace => "",
             Self::InvalidNeg { ty: _ } => "",
+            Self::IndexNonArray { ty: _ } => "",
         }
     }
 
@@ -106,6 +110,7 @@ impl<'a> ErrorKind<'a> {
             Self::UnknownVarOrType { name: _ } => Vec::new(),
             Self::NoPlace => Vec::new(),
             Self::InvalidNeg { ty: _ } => Vec::new(),
+            Self::IndexNonArray { ty: _ } => Vec::new(),
         }
     }
 
@@ -166,6 +171,9 @@ impl Display for ErrorKind<'_> {
             }
             Self::InvalidNeg { ty } => {
                 write!(f, "cannot negate `{ty}`")
+            }
+            Self::IndexNonArray { ty } => {
+                write!(f, "mismatched types: expected `T[]`, found `{ty}`")
             }
         }
     }
@@ -496,6 +504,21 @@ impl<'a> Visitor<'a> {
 
                 Some(TypeOrPlace::Place(place))
             }
+            Expr::Index { array, index } => {
+                let array = self.visit_expr(array).and_then(|ty| self.load_place(ty))?;
+                let index = self.visit_expr(index).and_then(|ty| self.load_place(ty))?;
+                self.perform_assign(&index, &Type::Int, index.span.clone(), None);
+
+                let Type::Array(ty) = array.value else {
+                    self.errors.push(Error {
+                        span: array.span.clone(),
+                        kind: ErrorKind::IndexNonArray { ty: array.value },
+                    });
+                    return None;
+                };
+
+                Some(TypeOrPlace::Type(*ty))
+            }
             Expr::Call { callee, args } => {
                 let callee = self.visit_expr(callee)?;
                 let callee = self.load_place_as_func(callee.value)?;
@@ -544,7 +567,6 @@ impl<'a> Visitor<'a> {
                     None
                 }
             }
-            x => todo!("{:?}", x),
         };
 
         ty.map(|ty| Spanned::new(expr.span.clone(), ty))
