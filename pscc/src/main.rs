@@ -135,6 +135,8 @@ fn main() -> ExitCode {
                 diag = diag.with_label(label);
             }
 
+            diag.notes.extend(err.kind.notes());
+
             term::emit_to_write_style(&mut writer.lock(), &config, &db, &diag).unwrap();
         }
 

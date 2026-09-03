@@ -42,6 +42,9 @@ pub enum ErrorKind<'a> {
         name: &'a str,
     },
     NoPlace,
+    InvalidNeg {
+        ty: Type,
+    },
 }
 
 impl<'a> ErrorKind<'a> {
@@ -66,6 +69,7 @@ impl<'a> ErrorKind<'a> {
             Self::UnknownType { ty: _ } => "unknown type used here",
             Self::UnknownVarOrType { name: _ } => "unknown variable or type used here",
             Self::NoPlace => "",
+            Self::InvalidNeg { ty: _ } => "",
         }
     }
 
@@ -101,6 +105,16 @@ impl<'a> ErrorKind<'a> {
             Self::UnknownType { ty: _ } => Vec::new(),
             Self::UnknownVarOrType { name: _ } => Vec::new(),
             Self::NoPlace => Vec::new(),
+            Self::InvalidNeg { ty: _ } => Vec::new(),
+        }
+    }
+
+    pub fn notes(&self) -> Vec<String> {
+        match self {
+            Self::InvalidNeg { ty: _ } => {
+                vec!["negation is only implemented for `int` and `float` types".to_owned()]
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -149,6 +163,9 @@ impl Display for ErrorKind<'_> {
             }
             Self::NoPlace => {
                 write!(f, "right-hand side must be a place expression")
+            }
+            Self::InvalidNeg { ty } => {
+                write!(f, "cannot negate `{ty}`")
             }
         }
     }
@@ -392,6 +409,18 @@ impl<'a> Visitor<'a> {
                 let rhs = self.visit_expr(rhs).and_then(|ty| self.load_place(ty))?;
                 let res = self.perform_coersion_binop(Binop::Div, expr.span.clone(), &lhs, &rhs)?;
                 Some(TypeOrPlace::Type(res))
+            }
+            Expr::Neg { value } => {
+                let value = self.visit_expr(value).and_then(|ty| self.load_place(ty))?;
+                if !matches!(value.value, Type::Int | Type::Float) {
+                    self.errors.push(Error {
+                        span: expr.span.clone(),
+                        kind: ErrorKind::InvalidNeg { ty: value.value },
+                    });
+                    return None;
+                }
+
+                Some(TypeOrPlace::Type(value.value))
             }
             Expr::CmpEq { lhs, rhs }
             | Expr::CmpNe { lhs, rhs }
