@@ -3,10 +3,10 @@ mod codegen;
 mod lexer;
 mod parser;
 mod registry;
+mod typecheck;
 
 use std::collections::HashMap;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -14,7 +14,7 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use codespan_reporting::term::{self, Config};
-use pex::{Class, Module, NamedFunction, State, StringKey, StringTable};
+use pex::{Class, NamedFunction, State, StringKey, StringTable};
 
 use crate::ast::Ast;
 use crate::codegen::CodegenOptions;
@@ -78,13 +78,21 @@ fn main() -> ExitCode {
         };
 
         let mut info = ClassInfo::default();
+
+        for global in &ast.globals {
+            info.globals
+                .insert(global.name.value.clone(), global.ty.value.clone());
+        }
+
         for prop in &ast.properties {
-            info.properties.insert(prop.name.clone(), prop.ty.clone());
+            info.properties
+                .insert(prop.name.clone(), prop.ty.value.clone());
         }
 
         for group in &ast.property_groups {
             for prop in &group.properties {
-                info.properties.insert(prop.name.clone(), prop.ty.clone());
+                info.properties
+                    .insert(prop.name.clone(), prop.ty.value.clone());
             }
         }
 
@@ -95,10 +103,14 @@ fn main() -> ExitCode {
                     members: st
                         .members
                         .iter()
-                        .map(|def| (def.name.clone(), def.ty.clone()))
+                        .map(|def| (def.name.value.clone(), def.ty.value.clone()))
                         .collect(),
                 },
             );
+        }
+
+        for func in &ast.functions {
+            info.functions.insert(func.name.clone(), func.clone());
         }
 
         registry.classes.insert(ast.script_name.clone(), info);
@@ -109,6 +121,25 @@ fn main() -> ExitCode {
     let Some(ast) = ast_to_compile else {
         return ExitCode::SUCCESS;
     };
+
+    if let Err(errs) = typecheck::typecheck(&registry, &ast) {
+        let id = data.last().unwrap().1;
+
+        for err in errs {
+            let mut diag = Diagnostic::error().with_message(&err.kind).with_label(
+                Label::primary(id, err.span.clone()).with_message(&err.kind.error_class()),
+            );
+
+            for msg in err.kind.help() {
+                let label = Label::secondary(id, msg.span.clone()).with_message(msg.value);
+                diag = diag.with_label(label);
+            }
+
+            term::emit_to_write_style(&mut writer.lock(), &config, &db, &diag).unwrap();
+        }
+
+        return ExitCode::FAILURE;
+    }
 
     let filename = args.input.file_name().unwrap();
 

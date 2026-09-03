@@ -329,20 +329,8 @@ impl<'a> Parser<'a> {
         Ok(Struct { name, members })
     }
 
-    fn parse_type(&mut self) -> Result<Type, Error<'a>> {
-        let ty = self.consume_ident()?;
-        let mut ty = Type::new(ty);
-
-        if self
-            .peek()
-            .is_some_and(|token| token.kind == TokenKind::OpenBracket)
-        {
-            self.consume();
-            self.consume_next(&[ParseToken::Token(&TokenKind::CloseBracket)])?;
-            ty = Type::Array(Box::new(ty));
-        }
-
-        Ok(ty)
+    fn parse_type(&mut self) -> Result<Spanned<Type>, Error<'a>> {
+        return self.parse_inline_type();
     }
 
     fn parse_inline_type(&mut self) -> Result<Spanned<Type>, Error<'a>> {
@@ -396,7 +384,7 @@ impl<'a> Parser<'a> {
             .is_some_and(|token| token.kind != TokenKind::CloseParen)
         {
             let ty = self.parse_type()?;
-            let name = self.consume_ident()?.to_owned();
+            let name = self.consume_ident_spanned()?.map(|s| s.to_owned());
             let mut value = None;
 
             // Default parameter value.
@@ -476,7 +464,7 @@ impl<'a> Parser<'a> {
 
     fn parse_define_stmt(&mut self) -> Result<Define, Error<'a>> {
         let ty = self.parse_type()?;
-        let name = self.consume_ident()?;
+        let name = self.consume_ident_spanned()?.map(|s| s.to_owned());
 
         let mut value = None;
         if self.peek().is_some_and(|tok| tok.kind == TokenKind::Eq) {
@@ -551,7 +539,7 @@ impl<'a> Parser<'a> {
                         .is_some_and(|token| matches!(token.kind, TokenKind::Eol | TokenKind::Eq))
                 {
                     let ty = self.parse_type()?;
-                    let ident = self.consume_ident()?;
+                    let ident = self.consume_ident_spanned()?;
                     let value = match self.consume_next(&[
                         ParseToken::Token(&TokenKind::Eq),
                         ParseToken::Token(&TokenKind::Eol),
@@ -567,7 +555,7 @@ impl<'a> Parser<'a> {
 
                     return Ok(Statement::Define(Define {
                         ty,
-                        name: ident.to_owned(),
+                        name: ident.map(|v| v.to_owned()),
                         value,
                     }));
                 }
@@ -1006,8 +994,8 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Define(Define {
-                ty: Type::Int,
-                name: "x".to_owned(),
+                ty: Spanned::erased(Type::Int),
+                name: Spanned::erased("x".to_owned()),
                 value: None
             })
         );
@@ -1028,8 +1016,8 @@ mod tests {
         assert_eq!(
             stmt,
             Statement::Define(Define {
-                ty: Type::Int,
-                name: "x".to_owned(),
+                ty: Spanned::erased(Type::Int),
+                name: Spanned::erased("x".to_owned()),
                 value: Some(Spanned::erased(Expr::Ident {
                     ident: "y".to_owned()
                 }))

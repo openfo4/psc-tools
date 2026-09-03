@@ -223,16 +223,21 @@ impl<'a> Tranlsator<'a> {
                                 continue;
                             }
 
-                            if let Some(global) = self.ast.globals.iter().find(|v| v.name == item) {
-                                let dst = self.create_value(global.ty.clone());
-                                self.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
+                            if let Some(global) =
+                                self.ast.globals.iter().find(|v| v.name.value == item)
+                            {
+                                let dst = self.create_value(global.ty.value.clone());
+                                self.push_ins(Instruction::LoadGlobal(
+                                    global.name.value.clone(),
+                                    dst,
+                                ));
                                 value = dst;
                                 continue;
                             }
 
                             if let Some(prop) = self.ast.properties.iter().find(|v| v.name == item)
                             {
-                                let dst = self.create_value(prop.ty.clone());
+                                let dst = self.create_value(prop.ty.value.clone());
                                 self.push_ins(Instruction::GetProperty(
                                     PropertyRef::Local(prop.name.to_owned()),
                                     dst,
@@ -244,7 +249,7 @@ impl<'a> Tranlsator<'a> {
                             for group in &self.ast.property_groups {
                                 if let Some(prop) = group.properties.iter().find(|v| v.name == item)
                                 {
-                                    let dst = self.create_value(prop.ty.clone());
+                                    let dst = self.create_value(prop.ty.value.clone());
                                     self.push_ins(Instruction::GetProperty(
                                         PropertyRef::Local(prop.name.to_owned()),
                                         dst,
@@ -381,14 +386,14 @@ pub fn lower_function(
     let mut params = Vec::new();
     for param in &func.params {
         let var = translator.get_or_create_var(&param.name);
-        let value = translator.create_value(param.ty.clone());
+        let value = translator.create_value(param.ty.value.clone());
         translator.ssa.def_var(var, value);
         translator
             .var_types
-            .insert(var, TypeOrPlace::Type(param.ty.clone()));
+            .insert(var, TypeOrPlace::Type(param.ty.value.clone()));
 
         params.push(Param {
-            ty: param.ty.clone(),
+            ty: param.ty.value.clone(),
             value,
         });
     }
@@ -452,7 +457,7 @@ pub fn lower_function(
         name: func.name.clone(),
         cfg: regcfg.clone(),
         is_static: func.is_global,
-        return_ty: func.return_ty.clone(),
+        return_ty: func.return_ty.clone().map(|v| v.value),
         regtys,
     };
 
@@ -463,11 +468,11 @@ fn lower_stmt(translator: &mut Tranlsator, stmt: &Statement) {
     match stmt {
         Statement::Define(def) => {
             let var = translator.ssa.create_var();
-            translator.variables.insert(def.name.clone(), var);
+            translator.variables.insert(def.name.value.clone(), var);
 
             translator
                 .var_types
-                .insert(var, TypeOrPlace::Type(def.ty.clone()));
+                .insert(var, TypeOrPlace::Type(def.ty.value.clone()));
 
             if let Some(expr) = &def.value {
                 let value = load_place_expr(translator, expr);
@@ -835,11 +840,15 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                 match seg {
                     PathSegment::Local(local) => place = *local,
                     PathSegment::Item(item) => {
-                        if let Some(global) =
-                            translator.ast.globals.iter().find(|v| &v.name == item)
+                        if let Some(global) = translator
+                            .ast
+                            .globals
+                            .iter()
+                            .find(|v| &v.name.value == item)
                         {
-                            let dst = translator.create_value(global.ty.clone());
-                            translator.push_ins(Instruction::LoadGlobal(global.name.clone(), dst));
+                            let dst = translator.create_value(global.ty.value.clone());
+                            translator
+                                .push_ins(Instruction::LoadGlobal(global.name.value.clone(), dst));
                             place = dst;
                             continue;
                         }
@@ -865,9 +874,15 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                     todo!()
                 }
                 PathSegment::Item(item) => {
-                    if let Some(global) = translator.ast.globals.iter().find(|v| &v.name == item) {
-                        let value = convert_to(translator, value, global.ty.clone());
-                        translator.push_ins(Instruction::StoreGlobal(global.name.clone(), value));
+                    if let Some(global) = translator
+                        .ast
+                        .globals
+                        .iter()
+                        .find(|v| &v.name.value == item)
+                    {
+                        let value = convert_to(translator, value, global.ty.value.clone());
+                        translator
+                            .push_ins(Instruction::StoreGlobal(global.name.value.clone(), value));
                         return;
                     }
 
@@ -884,7 +899,7 @@ fn store_place(translator: &mut Tranlsator, value: Value, dst: &Expr) {
                         )
                         .find(|v| &v.name == item)
                     {
-                        let value = convert_to(translator, value, prop.ty.clone());
+                        let value = convert_to(translator, value, prop.ty.value.clone());
                         translator.push_ins(Instruction::SetProperty(
                             PropertyRef::Local(prop.name.clone()),
                             value,
@@ -1100,7 +1115,7 @@ pub fn lower_property(
 
         let value = match &prop.value {
             Some(expr) => eval_constant_expr(expr, strings),
-            None => match prop.ty {
+            None => match prop.ty.value {
                 Type::None => pex::Value::Null,
                 Type::Bool => pex::Value::Bool(false),
                 Type::Int => pex::Value::Int(0),
@@ -1138,7 +1153,7 @@ pub fn lower_property(
 pub fn lower_global(global: &ast::Define, strings: &mut StringBuilder) -> pex::Variable {
     let value = match &global.value {
         Some(expr) => eval_constant_expr(expr, strings),
-        None => match global.ty {
+        None => match global.ty.value {
             Type::None => pex::Value::Null,
             Type::Bool => pex::Value::Bool(false),
             Type::Int => pex::Value::Int(0),

@@ -23,7 +23,7 @@ pub struct PropertyGroup {
 #[derive(Clone, Debug)]
 pub struct Property {
     pub name: String,
-    pub ty: Type,
+    pub ty: Spanned<Type>,
     pub value: Option<Expr>,
     pub is_auto: bool,
     pub is_const: bool,
@@ -109,7 +109,7 @@ pub struct Function {
     pub name: String,
     pub params: Vec<Define>,
     pub statements: Vec<Statement>,
-    pub return_ty: Option<Type>,
+    pub return_ty: Option<Spanned<Type>>,
     pub is_global: bool,
     pub is_native: bool,
     pub is_debug_only: bool,
@@ -267,8 +267,8 @@ pub struct ConditionBlock {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Define {
-    pub ty: Type,
-    pub name: String,
+    pub ty: Spanned<Type>,
+    pub name: Spanned<String>,
     pub value: Option<Spanned<Expr>>,
 }
 
@@ -297,6 +297,16 @@ impl<T> Spanned<T> {
 
     pub const fn erased(value: T) -> Self {
         Self { span: 0..0, value }
+    }
+
+    pub fn map<F, U>(self, f: F) -> Spanned<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        Spanned {
+            span: self.span,
+            value: f(self.value),
+        }
     }
 }
 
