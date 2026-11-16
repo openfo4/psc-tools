@@ -662,7 +662,10 @@ impl<'a> Parser<'a> {
     /// Returns the next token after a complete type.
     fn peek_after_type(&self) -> Option<&Token<'a>> {
         let (name, mut tokens) = self.tokens.split_first()?;
-        if !matches!(name.kind, TokenKind::Ident(_)) {
+        if !matches!(
+            name.kind,
+            TokenKind::Ident(_) | TokenKind::Literal(Literal::None)
+        ) {
             return None;
         }
 
