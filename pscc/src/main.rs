@@ -1,10 +1,3 @@
-mod ast;
-mod codegen;
-mod lexer;
-mod parser;
-mod registry;
-mod typecheck;
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,11 +7,7 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use codespan_reporting::term::{self, Config};
-use pex::{Class, NamedFunction, State, StringKey, StringTable};
-
-use crate::ast::Ast;
-use crate::codegen::CodegenOptions;
-use crate::registry::{ClassInfo, Registry, StructInfo};
+use pscc::{Compiler, Error};
 
 #[derive(Clone, Debug, Parser)]
 struct Args {
@@ -34,119 +23,27 @@ struct Args {
 fn main() -> ExitCode {
     let args = Args::parse();
 
-    let mut db = SimpleFiles::new();
-    let writer = StandardStream::stderr(ColorChoice::Auto);
-    let config = Config::default();
+    let mut writer = ErrorWriter::new();
+    let mut compiler = Compiler::new();
 
-    let mut files = args.import;
-    files.push(args.input.clone());
-
-    let mut data = Vec::new();
-    for path in &files {
-        let s = std::fs::read_to_string(path).unwrap();
-        let id = db.add(path.to_string_lossy(), s.clone());
-        data.push((s, id));
-    }
-
-    let mut file_tokens = Vec::new();
-    for (s, id) in &data {
-        let Ok(tokens) = lexer::tokenize(s).inspect_err(|err| {
-            let diag = Diagnostic::error()
-                .with_message(&err.kind)
-                .with_label(Label::primary(*id, err.span.clone()));
-            term::emit_to_write_style(&mut writer.lock(), &config, &db, &diag).unwrap();
-        }) else {
+    for path in &args.import {
+        if let Err(err) = compiler.add_file_source(path) {
+            writer.write(&err);
             return ExitCode::FAILURE;
-        };
-        file_tokens.push(tokens);
+        }
     }
 
-    let mut ast_to_compile = None;
-
-    let mut registry = Registry::default();
-
-    for ((_, id), tokens) in data.iter().zip(file_tokens) {
-        let mut parser = parser::Parser::new(&tokens);
-        let Ok(ast) = parser.parse().inspect_err(|err| {
-            dbg!(&err.span);
-            let diag = Diagnostic::error()
-                .with_message(&err.kind)
-                .with_label(Label::primary(*id, err.span.clone()).with_message(&err.kind));
-            term::emit_to_write_style(&mut writer.lock(), &config, &db, &diag).unwrap();
-        }) else {
-            return ExitCode::FAILURE;
-        };
-
-        let mut info = ClassInfo::default();
-
-        for global in &ast.globals {
-            info.globals
-                .insert(global.name.value.clone(), global.ty.value.clone());
+    let Ok(output) = compiler.compile_file(&args.input).inspect_err(|errs| {
+        for err in &**errs {
+            writer.write(err);
         }
-
-        for prop in &ast.properties {
-            info.properties
-                .insert(prop.name.clone(), prop.ty.value.clone());
-        }
-
-        for group in &ast.property_groups {
-            for prop in &group.properties {
-                info.properties
-                    .insert(prop.name.clone(), prop.ty.value.clone());
-            }
-        }
-
-        for st in &ast.structs {
-            registry.structs.insert(
-                st.name.clone(),
-                StructInfo {
-                    members: st
-                        .members
-                        .iter()
-                        .map(|def| (def.name.value.clone(), def.ty.value.clone()))
-                        .collect(),
-                },
-            );
-        }
-
-        for func in &ast.functions {
-            info.functions.insert(func.name.clone(), func.clone());
-        }
-
-        registry.classes.insert(ast.script_name.clone(), info);
-
-        ast_to_compile = Some(ast);
-    }
-
-    let Some(ast) = ast_to_compile else {
-        return ExitCode::SUCCESS;
+    }) else {
+        return ExitCode::FAILURE;
     };
 
-    if let Err(errs) = typecheck::typecheck(&registry, &ast) {
-        let id = data.last().unwrap().1;
-
-        for err in errs {
-            let mut diag = Diagnostic::error().with_message(&err.kind).with_label(
-                Label::primary(id, err.span.clone()).with_message(&err.kind.error_class()),
-            );
-
-            for msg in err.kind.help() {
-                let label = Label::secondary(id, msg.span.clone()).with_message(msg.value);
-                diag = diag.with_label(label);
-            }
-
-            diag.notes.extend(err.kind.notes());
-
-            term::emit_to_write_style(&mut writer.lock(), &config, &db, &diag).unwrap();
-        }
-
-        return ExitCode::FAILURE;
-    }
+    let bytes = output.write();
 
     let filename = args.input.file_name().unwrap();
-
-    let module = compile_module(&ast, &registry);
-    let bytes = module.write();
 
     std::fs::create_dir_all(&args.out_dir).unwrap();
     let mut dst = args.out_dir.join(filename);
@@ -157,80 +54,49 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct StringBuilder {
-    strings: StringTable,
-    table: HashMap<String, StringKey>,
+struct ErrorWriter {
+    db: SimpleFiles<String, String>,
+    writer: StandardStream,
+    config: Config,
+    files: HashMap<PathBuf, usize>,
 }
 
-impl StringBuilder {
-    pub fn insert(&mut self, s: &str) -> StringKey {
-        if let Some(key) = self.table.get(s) {
-            return *key;
+impl ErrorWriter {
+    fn new() -> Self {
+        Self {
+            db: SimpleFiles::new(),
+            writer: StandardStream::stderr(ColorChoice::Auto),
+            config: Config::default(),
+            files: HashMap::new(),
+        }
+    }
+
+    fn write(&mut self, err: &Error) {
+        let path = err.path().unwrap();
+        let id = match self.files.get(path) {
+            Some(id) => *id,
+            None => {
+                let contents = std::fs::read_to_string(path).unwrap();
+                let id = self.db.add(path.to_str().unwrap().to_owned(), contents);
+                self.files.insert(path.to_owned(), id);
+
+                id
+            }
+        };
+
+        let mut diag = Diagnostic::error()
+            .with_message(err)
+            .with_label(Label::primary(id, err.span()));
+
+        for hint in err.hints() {
+            let label = Label::secondary(id, hint.span()).with_message(hint);
+            diag = diag.with_label(label);
         }
 
-        let key = self.strings.insert(s.to_owned().into());
-        self.table.insert(s.to_owned(), key);
-        key
-    }
-}
+        for note in err.notes() {
+            diag = diag.with_note(note);
+        }
 
-fn compile_module(ast: &Ast, registry: &Registry) -> pex::Module {
-    let mut strings = StringBuilder::default();
-
-    let mut functions = Vec::new();
-    for func in &ast.functions {
-        let function = codegen::lower_function(
-            &ast,
-            func,
-            &mut strings,
-            &CodegenOptions {
-                preserve_parameter_names: true,
-            },
-            registry,
-        );
-        functions.push(NamedFunction {
-            name: strings.insert(&func.name),
-            function,
-        });
-    }
-
-    let mut properties = Vec::new();
-    let mut globals = Vec::new();
-    for prop in ast.properties.iter().chain(
-        ast.property_groups
-            .iter()
-            .flat_map(|group| &group.properties),
-    ) {
-        let (prop, glob) = codegen::lower_property(prop, &mut strings);
-        properties.push(prop);
-        globals.push(glob);
-    }
-
-    for glob in &ast.globals {
-        let glob = codegen::lower_global(glob, &mut strings);
-        globals.push(glob);
-    }
-
-    let classes = vec![Class {
-        name: strings.insert(&ast.script_name),
-        parent: strings.insert(ast.extends.as_ref().map(|v| v.as_str()).unwrap_or("none")),
-        docstring: strings.insert(""),
-        is_const: false,
-        user_flags: 0,
-        auto_state_name: strings.insert(""),
-        structs: Vec::new(),
-        variables: globals,
-        properties,
-        states: vec![State {
-            name: strings.insert(""),
-            functions,
-        }],
-    }];
-
-    pex::Module {
-        endian: pex::Endianess::Little,
-        classes,
-        strings: strings.strings,
+        term::emit_to_write_style(&mut self.writer.lock(), &self.config, &self.db, &diag).ok();
     }
 }
